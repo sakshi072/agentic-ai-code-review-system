@@ -3,6 +3,7 @@ import logging
 import json
 from app.utils.pr_helper import verify_github_signature, log_pr_data, classify_pr_size
 from app.models.pr_models import PRData
+from app.clients.github_mcp_client import github_mcp_session
 
 logger = logging.getLogger(__name__)
 

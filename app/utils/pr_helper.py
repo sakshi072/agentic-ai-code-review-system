@@ -4,6 +4,7 @@ import hmac
 import hashlib
 from app.core.settings import settings
 from app.models.pr_models import PRData
+from app.core.configs.github_server_config import ALLOWED_TOOLS
 
 logger = logging.getLogger(__name__)
 GITHUB_WEBHOOK_SECRET = settings.GITHUB_WEBHOOK_SECRET
@@ -69,3 +70,13 @@ def classify_pr_size(changed_files:int, total_lines:int) -> str:
         return "L"
     else:
         return "XL"
+
+def filter_tools(all_tools:list) -> list:
+    tools = [t for t in all_tools if t.name in ALLOWED_TOOLS]
+    skipped = [t.name for t in all_tools if t.name not in ALLOWED_TOOLS]
+    logger.info(f"{len(tools)} tools loaded (skipped {len(skipped)})")
+    for t in tools:
+        logger.info(f"   🔧 {t.name}")
+    if skipped:
+        logger.debug(f"   Skipped: {skipped}")
+    return tools
