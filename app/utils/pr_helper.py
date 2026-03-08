@@ -2,8 +2,8 @@
 import logging
 import hmac 
 import hashlib
-from app.core.settings import settings
-from app.models.pr_models import PRData
+from app.core.configs.settings import settings
+from app.models.pr_model import PRData
 from app.core.configs.github_server_config import ALLOWED_TOOLS
 
 logger = logging.getLogger(__name__)

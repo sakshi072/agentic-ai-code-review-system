@@ -2,8 +2,9 @@ from fastapi import APIRouter, Request, Header, HTTPException
 import logging
 import json
 from app.utils.pr_helper import verify_github_signature, log_pr_data, classify_pr_size
-from app.models.pr_models import PRData
+from app.models.pr_model import PRData
 from app.clients.github_mcp_client import github_mcp_session
+from app.services.supervisor_service import start_supervisor
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,8 @@ async def review_pr(
     # Structured logging
     log_pr_data(pr_data, action)
 
-    # TODO: Dispatch to agent pipeline (next step)
-    logger.info(f"🔜 PR #{pr_data.number} queued for agent review pipeline")
+    # Send pr_data to langGraph supervisor agent 
+    start_supervisor(pr_data)
 
     return {
         "status": "accepted",
