@@ -1,26 +1,30 @@
-from app.core.settings import settings
+from app.core.configs.settings import settings
 import logging
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_TOOLS = {
-    # Read - used by all specialist agents
-    "get_pull_request",
-    "get_pull_request_files",
-    "get_pull_request_comments",
-    "get_pull_request_reviews",
-    "get_pull_request_status",
-    "get_file_contents",
-    "get_issue",
-    "list_commits",
-    "search_code",
-    "list_issues",
-    "list_pull_requests",
+class MCPTool(str, Enum):
+    """
+    GitHub MCP tool names — single source of truth.
+    Use these instead of hardcoded strings in agent code.
+    """
+    # Read
+    GET_PULL_REQUEST         = "get_pull_request"
+    GET_PULL_REQUEST_FILES   = "get_pull_request_files"
+    GET_PULL_REQUEST_COMMENTS = "get_pull_request_comments"
+    GET_PULL_REQUEST_REVIEWS  = "get_pull_request_reviews"
+    GET_PULL_REQUEST_STATUS   = "get_pull_request_status"
+    GET_FILE_CONTENTS        = "get_file_contents"
+    GET_ISSUE                = "get_issue"
+    LIST_COMMITS             = "list_commits"
+    SEARCH_CODE              = "search_code"
+    LIST_ISSUES              = "list_issues"
+    LIST_PULL_REQUESTS       = "list_pull_requests"
+    # Write
+    CREATE_PULL_REQUEST_REVIEW = "create_pull_request_review"
 
-    # Write - supervisor agent only
-    "create_pull_request_review", # covers approve / request_changes / inline comments
-
-}
+ALLOWED_TOOLS = {tool.value for tool in MCPTool}
 
 def build_server_config() -> dict:
     """Build server config"""
