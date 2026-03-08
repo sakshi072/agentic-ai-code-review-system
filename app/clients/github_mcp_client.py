@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from app.core.settings import settings
+from app.core.configs.settings import settings
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from app.core.configs.github_server_config import build_server_config
 from app.utils.pr_helper import filter_tools
@@ -50,11 +50,8 @@ class GithubMCPSession:
     @property
     def tools(self) -> list:
         """Langchain-compatible tools - pass directly into LangGraph agents."""
-        if not self._client:
-            raise RuntimeError(
-                "GitHub MCP session is not started. "
-                "Ensure session.start() is called in FastAPI lifespan."
-            )
+        if not self._tools:
+            self.start()
         return self._tools
 
     def get_tool(self, name: str):
