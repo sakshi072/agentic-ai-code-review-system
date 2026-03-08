@@ -75,17 +75,15 @@ async def supervisor_node(state: PRReviewState):
     # Format unified review body
     review_body = _format_review_body(security)
 
-    logger.info(f"BODY REPR: {repr(review_body[:100])}")
-
     # Post to Github via MCP
-    # await github_mcp_session.invoke_tool(
-    #     MCPTool.CREATE_PULL_REQUEST_REVIEW,
-    #     owner=state["owner"],
-    #     repo=state["repo"],
-    #     pull_number=state["pr_number"],
-    #     body=review_body,
-    #     event=review_decsion.value
-    # )
+    await github_mcp_session.invoke_tool(
+        MCPTool.CREATE_PULL_REQUEST_REVIEW,
+        owner=state["owner"],
+        repo=state["repo"],
+        pull_number=state["pr_number"],
+        body=review_body,
+        event=review_decsion.value
+    )
 
     return {
         "final_review": review_body,
