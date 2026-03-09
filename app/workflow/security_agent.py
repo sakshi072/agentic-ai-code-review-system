@@ -2,7 +2,7 @@ from app.models.agent_finding_model import SecurityResponseSchema
 from app.models.workflow_state import PRReviewState, AgentFinding, Category
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
-from app.utils.agent_helper import parse_mcp_response, build_llm, format_files_for_llm
+from app.utils.agent_helper import parse_mcp_response, build_llm, format_files_for_llm, find_line_in_diff
 from app.core.prompts.security_agent_prompt import SECURITY_AGENT_SYSTEM_PROMPT
 from langchain_core.messages import SystemMessage, HumanMessage
 import logging
@@ -26,7 +26,7 @@ async def security_agent_node(state: PRReviewState) -> dict:
     pr_number = state["pr_number"]
 
     logger.info(f"Security agent starting - {owner}/{repo}/{pr_number}")
-
+    github_mcp_session.tools
     # Fetch changed files via MCP
     try:
         raw_changes = await github_mcp_session.invoke_tool(
@@ -74,13 +74,18 @@ async def security_agent_node(state: PRReviewState) -> dict:
         logger.error(f"Structured LLM call failed: {e}")
         return {"security_findings": [], "messages": state["messages"]}
 
+    file_patches = {f.get("filename"): f.get("patch", "") for f in files}
+
     # Map pydantic -> AgentFinding TypedDict
     findings:list[AgentFinding] = [
         AgentFinding(
             severity = finding.severity,
             category = Category.SECURITY,
             file = finding.file,
-            line = finding.line,
+            line = find_line_in_diff(
+                file_patches.get(finding.file, ""),
+                finding.code_snippet
+            ),
             title = finding.title,
             description = finding.description.replace("\\\\n", "\\n"),
             suggestion = finding.suggestion.replace("\\\\n", "\\n"),

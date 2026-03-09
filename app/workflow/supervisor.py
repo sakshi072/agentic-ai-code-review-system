@@ -62,6 +62,32 @@ def _format_review_body(findings: list) -> str:
 
     return chr(10).join(lines)
 
+def _build_inline_comments(findings: list) -> list[dict]:
+    """
+    Build inline comment objects for findings that have line numbers.
+    Findings without line number appear in the overall body only.
+    """
+    comments = []
+    
+    for f in findings:
+        if not f.get("line"):
+            continue
+        try:
+            line = int(str(f["line"]).split("-")[0])
+        except (ValueError, TypeError):
+            continue
+
+        comments.append({
+            "path": f["file"],
+            "line": line,
+            "body": (
+                f"**{f['title']}**(`{f['severity'].value.upper()}`)\n\n"
+                f"**Issue:** {f['description']}\n\n"
+                f"**Suggestion:** {f['suggestion']}"
+            )
+        })
+    return comments
+
 async def supervisor_node(state: PRReviewState):
     """
     Runs after all specialist agents complete.
@@ -75,14 +101,20 @@ async def supervisor_node(state: PRReviewState):
     # Format unified review body
     review_body = _format_review_body(security)
 
-    # Post to Github via MCP
+    for finding in security:
+        logger.info(f"PR review inline comment line number - {finding["line"]}")
+
+    inline_comments = _build_inline_comments(security)
+
+    #Post to Github via MCP
     await github_mcp_session.invoke_tool(
         MCPTool.CREATE_PULL_REQUEST_REVIEW,
         owner=state["owner"],
         repo=state["repo"],
         pull_number=state["pr_number"],
         body=review_body,
-        event=review_decsion.value
+        event=review_decsion.value,
+        comments=inline_comments, 
     )
 
     return {

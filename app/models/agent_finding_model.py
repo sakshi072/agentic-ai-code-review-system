@@ -5,7 +5,10 @@ class AgentFindingSchema(BaseModel):
     """Single agent finding — schema enforced by LLM structured output."""
     severity:    Severity = Field(description="Severity level: critical, high, medium, low, or info")
     file:        str      = Field(description="Path to the file where the issue was found")
-    line:        str | None = Field(default=None, description="Line number or range e.g. '42' or '42-55'")
+    code_snippet: str = Field(
+        description="Copy the exact line of code from the diff that contains the issue, "
+                    "as it appears after the + sign. Used to locate the precise line number."
+    )
     title:       str      = Field(description="Short one-line summary of the issue")
     description: str      = Field(description="Clear explanation of why this is a security risk")
     suggestion:  str      = Field(description="Concrete fix recommendation with code example if possible")

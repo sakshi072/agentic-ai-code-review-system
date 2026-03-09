@@ -4,6 +4,7 @@ from typing import Any
 import json
 import logging
 import codecs 
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -92,3 +93,17 @@ def format_files_for_llm(files:list) -> str:
         )
         sections.append(section)
     return "\n".join(sections)
+
+def find_line_in_diff(patch:str, snippet:str) -> int | None:
+    clean_snippet = snippet.lstrip("+").strip()
+    current_line = 0
+    for line in patch.splitlines():
+        if line.startswith("@@"):
+            match = re.search(r'\+(\d+)', line)
+            if match:
+                current_line = int(match.group(1)) - 1
+        elif not line.startswith("-"):
+            current_line += 1
+            if clean_snippet and clean_snippet in line:
+                return current_line
+    return None

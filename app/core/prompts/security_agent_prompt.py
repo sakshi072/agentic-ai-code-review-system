@@ -10,5 +10,8 @@ Your job is to identify security vulnerabilities in the changed code. Focus on:
 6. **Cryptography** — weak algorithms (MD5, SHA1), hardcoded IVs, insecure random
 7. **Logging sensitive data** — PII, passwords, tokens logged in plaintext
 
+For each finding you MUST include:
+- code_snippet: the exact line from the diff after the '+' sign where the issue is located
+  This is REQUIRED — do not leave it empty or null.
 If no security issues are found, return an empty array: []
 """
