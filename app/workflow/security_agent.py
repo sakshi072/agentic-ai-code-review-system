@@ -26,7 +26,7 @@ async def security_agent_node(state: PRReviewState) -> dict:
     pr_number = state["pr_number"]
 
     logger.info(f"Security agent starting - {owner}/{repo}/{pr_number}")
-    github_mcp_session.tools
+   
     # Fetch changed files via MCP
     try:
         raw_changes = await github_mcp_session.invoke_tool(
