@@ -123,3 +123,34 @@ async def fetch_file_contents(owner, repo, pr_number):
     logger.info(f"Security agent fetched {len(files)} changed files")
     logger.info(f"files ======= {files}")
     return files
+
+def merge_dicts(a:dict | None, b:dict | None) -> dict:
+    """Merge two dict - b override a keys"""
+    return {**(a or {}), **(b or {})}
+
+def split_files_by_sha(
+    files: list,
+    prev_shas: dict[str, str]
+) -> tuple[list, list]:
+    """Returns to_analyze and skipped files"""
+    to_analyze = []
+    skipped = []
+
+    for f in files:
+        filename = f.get("filename")
+        sha = f.get("sha", "")
+
+        if prev_shas.get(filename) == sha:
+            logger.info(f" {filename} - sha unchanged, skipping")
+            skipped.append(f)
+        else:
+            logger.info(f" {filename} - sha changed or new, analyzing")
+            to_analyze.append(f)
+    return to_analyze, skipped
+
+def updated_shas(prev_shas:dict, files:list) -> dict:
+    """Returns merged sha map with current files' shas"""
+    return {
+        **prev_shas,
+        **{f.get("filename"): f.get("sha", "") for f in files}
+    }

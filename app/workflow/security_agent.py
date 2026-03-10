@@ -2,7 +2,14 @@ from app.models.agent_finding_model import SecurityResponseSchema
 from app.models.workflow_state import PRReviewState, AgentFinding, Category
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
-from app.utils.agent_helper import parse_mcp_response, build_llm, format_files_for_llm, find_line_in_diff, fetch_file_contents
+from app.utils.agent_helper import (
+    build_llm, 
+    format_files_for_llm, 
+    find_line_in_diff, 
+    fetch_file_contents, 
+    split_files_by_sha,
+    updated_shas
+)
 from app.core.prompts.security_agent_prompt import SECURITY_AGENT_SYSTEM_PROMPT
 from langchain_core.messages import SystemMessage, HumanMessage
 import logging
@@ -34,8 +41,21 @@ async def security_agent_node(state: PRReviewState) -> dict:
         logger.error(f" Failed to fetch PR files: {e}")
         return {"security_findings": [], "messages": state["messages"]}
     
+    prev_shas = state.get("analyzed_file_shas") or {}
+    
+    # Skip unchanged files
+    to_analyze, skipped = split_files_by_sha(files, prev_shas)
+
+    if not to_analyze:
+        logger.info("Security agent - all files unchanged, nothing to analyze")
+        return {
+            "security_findings": [],
+            "analyzed_file_shas": updated_shas(prev_shas, files),
+            "messages": state["messages"]
+        }
+
     # Build diff context for llm
-    diff_context = format_files_for_llm(files)
+    diff_context = format_files_for_llm(to_analyze)
     logger.info(f"DIFF CONTEXT SENT TO LLM:\\n{diff_context}")
 
     if not diff_context.strip():
@@ -63,15 +83,19 @@ async def security_agent_node(state: PRReviewState) -> dict:
         logger.info(f"Structured response received - {len(response.findings)} findings")
     except Exception as e:
         logger.error(f"Structured LLM call failed: {e}")
-        return {"security_findings": [], "messages": state["messages"]}
+        return {
+            "security_findings": [], 
+            "analyzed_file_shas": updated_shas(prev_shas, files),
+            "messages": state["messages"]
+            }
 
     file_patches = {f.get("filename"): f.get("patch", "") for f in files}
 
     # Map pydantic -> AgentFinding TypedDict
     findings:list[AgentFinding] = [
         AgentFinding(
-            severity = finding.severity,
-            category = Category.SECURITY,
+            severity = finding.severity.value,
+            category = Category.SECURITY.value,
             file = finding.file,
             line = find_line_in_diff(
                 file_patches.get(finding.file, ""),
@@ -87,9 +111,10 @@ async def security_agent_node(state: PRReviewState) -> dict:
     logger.info(f" Security agent complete — {len(findings)} findings")
 
     for f in findings:
-        logger.info(f"   [{f['severity'].value.upper()}] {f['file']}: {f['title']}")
+        logger.info(f"   [{f['severity'].upper()}] {f['file']}: {f['title']}")
 
     return {
         "security_findings": findings,
+        "analyzed_file_shas": updated_shas(prev_shas, files),
         "messages": state["messages"]
     }

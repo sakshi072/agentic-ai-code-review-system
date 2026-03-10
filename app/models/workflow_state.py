@@ -9,6 +9,7 @@ from typing import TypedDict, Optional, Annotated
 from enum import Enum
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
+from app.utils.agent_helper import merge_dicts
 
 class ReviewDecision(str, Enum):
     APPROVED = "APPROVED"
@@ -74,7 +75,7 @@ class PRReviewState(TypedDict):
     security_findings: Optional[list[AgentFinding]]
     style_findings: Optional[list[AgentFinding]]
     test_findings: Optional[list[AgentFinding]]
-
+    analyzed_file_shas:  Annotated[dict[str, str], merge_dicts]
     # Supervisor output
     final_review: Optional[str]     # markdown summary posted to GitHub
     review_decision: Optional[ReviewDecision]  # enum — maps to GitHub API value

@@ -13,12 +13,16 @@ from app.workflow.security_agent import security_agent_node
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
 from app.workflow.style_agent import style_agent_node
+from langgraph.checkpoint.memory import InMemorySaver
+
 logger = logging.getLogger(__name__)
+checkpointer = InMemorySaver()
 
 def _decide_review_outcome(findings: list) -> ReviewDecision:
+    # if not findings:
+    #     return ReviewDecision.APPROVE
     if not findings:
-        return ReviewDecision.APPROVE
-    
+        return ReviewDecision.COMMENT
     # severities = [f["severity"] for f in findings]
     # has_high_or_above = any(s.value in ("critical", "high") for s in severities)
     # if has_high_or_above:
@@ -31,15 +35,15 @@ def _format_review_body(security: list, style: list) -> str:
     lines.append("")
 
     if security:
-        critical_high = [f for f in security if f["severity"].value in ("critical", "high")]
-        medium_low    = [f for f in security if f["severity"].value in ("medium", "low", "info")]
+        critical_high = [f for f in security if f["severity"] in ("critical", "high")]
+        medium_low    = [f for f in security if f["severity"] in ("medium", "low", "info")]
 
         if critical_high:
             lines.append("### Security — Critical / High")
             lines.append("")
             for f in critical_high:
                 lines.append(f"**`{f['file']}`** - {f['title']}")
-                lines.append(f"- **Severity:** `{f['severity'].value.upper()}`")
+                lines.append(f"- **Severity:** `{f["severity"].upper()}`")
                 if f.get("line"):
                     lines.append(f"- **Line:** `{f['line']}`")
                 lines.append(f"- **Issue:** {f['description']}")
@@ -51,7 +55,7 @@ def _format_review_body(security: list, style: list) -> str:
             lines.append("")
             for f in medium_low:
                 lines.append(f"**`{f['file']}`** - {f['title']}")
-                lines.append(f"- **Severity:** `{f['severity'].value.upper()}`")
+                lines.append(f"- **Severity:** `{f["severity"].upper()}`")
                 if f.get("line"):
                     lines.append(f"- **Line:** `{f['line']}`")
                 lines.append(f"- **Issue:** {f['description']}")
@@ -63,7 +67,7 @@ def _format_review_body(security: list, style: list) -> str:
         lines.append("")
         for f in style:
             lines.append(f"**`{f['file']}`** - {f['title']}")
-            lines.append(f"- **Severity:** `{f['severity'].value.upper()}`")
+            lines.append(f"- **Severity:** `{f["severity"].upper()}`")
             lines.append(f"- **Issue:** {f['description']}")
             lines.append(f"- **Fix:** {f['suggestion']}")
             lines.append("")
@@ -96,7 +100,7 @@ def _build_inline_comments(findings: list) -> list[dict]:
             "path": f["file"],
             "line": line,
             "body": (
-                f"**{f['title']}**(`{f['severity'].value.upper()}`)\n\n"
+                f"**{f['title']}**(`{f['severity'].upper()}`)\n\n"
                 f"**Issue:** {f['description']}\n\n"
                 f"**Suggestion:** {f['suggestion']}"
             )
@@ -111,6 +115,14 @@ async def supervisor_node(state: PRReviewState):
     security = state["security_findings"] or []
     style = state["style_findings"] or []
     all_findings = security + style
+
+    # Skip posting if no findings
+    if not all_findings:
+        logger.info("No findings — skipping review post")
+        return {
+            "final_review":    None,
+            "review_decision": None,
+        }
 
     # Decide review outcome based on severity
     review_decsion = _decide_review_outcome(all_findings)
@@ -159,7 +171,7 @@ def supervisor_pipeline():
 
     graph.add_edge("supervisor", END)
 
-    compiled = graph.compile()
+    compiled = graph.compile(checkpointer=checkpointer)
     logger.info("PR review worflow compiled")
     return compiled
 

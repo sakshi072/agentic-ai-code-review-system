@@ -1,7 +1,14 @@
 from app.models.workflow_state import PRReviewState, AgentFinding, Category
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
-from app.utils.agent_helper import fetch_file_contents, format_files_for_llm, build_llm, find_line_in_diff
+from app.utils.agent_helper import (
+    build_llm, 
+    format_files_for_llm, 
+    find_line_in_diff, 
+    fetch_file_contents, 
+    split_files_by_sha,
+    updated_shas
+)
 from app.models.agent_finding_model import StyleResponseSchema
 from app.core.prompts.style_agent_prompt import STYLE_AGENT_SYSTEM_PROMPT
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -32,13 +39,30 @@ async def style_agent_node(state:PRReviewState):
         logger.error(f" Failed to fetch PR files: {e}")
         return {"style_findings": [], "messages": state["messages"]}
     
+    prev_shas = state.get("analyzed_file_shas") or {}
+    
+    # Skip unchanged files
+    to_analyze, skipped = split_files_by_sha(files, prev_shas)
+
+    if not to_analyze:
+        logger.info("Style agent - all files unchanged, nothing to analyze")
+        return {
+            "style_findings": [],
+            "analyzed_file_shas": updated_shas(prev_shas, files),
+            "messages": state["messages"]
+        }
+
     # Build diff context for llm
-    diff_context = format_files_for_llm(files)
+    diff_context = format_files_for_llm(to_analyze)
     logger.info(f"DIFF CONTEXT SENT TO LLM:\\n{diff_context}")
 
     if not diff_context.strip():
         logger.info("No reviewable files found - skipping style analysis")
-        return {"style_findings": [], "messages": state["messages"]}
+        return {
+            "style_findings": [], 
+            "analyzed_file_shas": updated_shas(prev_shas, files),
+            "messages": state["messages"]
+            }
     
     # Call structured LLM
     structured_llm = build_llm("qwen3:8b", 0, "http://localhost:11434").with_structured_output(
@@ -66,8 +90,8 @@ async def style_agent_node(state:PRReviewState):
     # Map pydantic -> AgentFinding TypedDict
     findings:list[AgentFinding] = [
         AgentFinding(
-            severity = finding.severity,
-            category = Category.STYLE,
+            severity = finding.severity.value,
+            category = Category.STYLE.value,
             file = finding.file,
             line = find_line_in_diff(
                 file_patches.get(finding.file, ""),
@@ -83,10 +107,11 @@ async def style_agent_node(state:PRReviewState):
     logger.info(f" Style agent complete — {len(findings)} findings")
 
     for f in findings:
-        logger.info(f"   [{f['severity'].value.upper()}] {f['file']}: {f['title']}")
+        logger.info(f"   [{f['severity'].upper()}] {f['file']}: {f['title']}")
 
     return {
         "style_findings": findings,
+        "analyzed_file_shas": updated_shas(prev_shas, files),
         "messages": state["messages"]
     }
 
