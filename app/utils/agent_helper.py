@@ -1,5 +1,7 @@
 from langchain_ollama import ChatOllama
 from app.core.configs.settings import settings
+from app.clients.github_mcp_client import github_mcp_session
+from app.core.configs.github_server_config import MCPTool
 from typing import Any
 import json
 import logging
@@ -107,3 +109,17 @@ def find_line_in_diff(patch:str, snippet:str) -> int | None:
             if clean_snippet and clean_snippet in line:
                 return current_line
     return None
+
+async def fetch_file_contents(owner, repo, pr_number):
+    # Fetch changed files via MCP
+    raw_changes = await github_mcp_session.invoke_tool(
+        MCPTool.GET_PULL_REQUEST_FILES,
+        owner=owner,
+        repo=repo,
+        pull_number=pr_number
+    )
+
+    files = parse_mcp_response(raw_changes)
+    logger.info(f"Security agent fetched {len(files)} changed files")
+    logger.info(f"files ======= {files}")
+    return files

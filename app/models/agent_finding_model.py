@@ -19,3 +19,23 @@ class SecurityResponseSchema(BaseModel):
         default_factory=list,
         description="List of security findings. Empty list if no issues found."
     )
+
+class StyleFindingSchema(BaseModel):
+    severity:     Severity = Field(description="Severity: high, medium, low, or info")
+    file:         str      = Field(description="Path to the file where the issue was found")
+    code_snippet: str      = Field(
+        description=(
+            "REQUIRED. Copy the exact line from the diff after the '+' sign "
+            "where the issue occurs. Example: '+    def x():'"
+        )
+    )
+    title:       str = Field(description="Short one-line summary of the style issue")
+    description: str = Field(description="Clear explanation of why this is a style or quality problem")
+    suggestion:  str = Field(description="Concrete improvement with example if possible")
+
+
+class StyleResponseSchema(BaseModel):
+    findings: list[StyleFindingSchema] = Field(
+        default_factory=list,
+        description="List of style findings. Empty list if no issues found."
+    )

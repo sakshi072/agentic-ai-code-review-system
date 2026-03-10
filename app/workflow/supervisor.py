@@ -12,7 +12,7 @@ from app.models.workflow_state import PRReviewState, ReviewDecision
 from app.workflow.security_agent import security_agent_node
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
-
+from app.workflow.style_agent import style_agent_node
 logger = logging.getLogger(__name__)
 
 def _decide_review_outcome(findings: list) -> ReviewDecision:
@@ -25,40 +25,55 @@ def _decide_review_outcome(findings: list) -> ReviewDecision:
     #     return ReviewDecision.REQUEST_CHANGES
     return ReviewDecision.COMMENT
 
-def _format_review_body(findings: list) -> str:
-    critical_high = [f for f in findings if f["severity"].value in ("critical", "high")]
-    medium_low    = [f for f in findings if f["severity"].value in ("medium", "low", "info")]
-
+def _format_review_body(security: list, style: list) -> str:
     lines = []
-    lines.append("## Security Review")
+    lines.append("## Security & Style Review")
     lines.append("")
 
-    if critical_high:
-        lines.append("### Critical / High Severity")
-        lines.append("")
-        for f in critical_high:
-            lines.append(f"**`{f['file']}`** - {f['title']}")
-            lines.append(f"- **Severity:** `{f['severity'].value.upper()}`")
-            if f.get("line"):
-                lines.append(f"- **Line:** `{f['line']}`")
-            lines.append(f"- **Issue:** {f['description']}")
-            lines.append(f"- **Fix:** {f['suggestion']}")
-            lines.append("")
+    if security:
+        critical_high = [f for f in security if f["severity"].value in ("critical", "high")]
+        medium_low    = [f for f in security if f["severity"].value in ("medium", "low", "info")]
 
-    if medium_low:
-        lines.append("### Medium / Low Severity")
+        if critical_high:
+            lines.append("### Security — Critical / High")
+            lines.append("")
+            for f in critical_high:
+                lines.append(f"**`{f['file']}`** - {f['title']}")
+                lines.append(f"- **Severity:** `{f['severity'].value.upper()}`")
+                if f.get("line"):
+                    lines.append(f"- **Line:** `{f['line']}`")
+                lines.append(f"- **Issue:** {f['description']}")
+                lines.append(f"- **Fix:** {f['suggestion']}")
+                lines.append("")
+
+        if medium_low:
+            lines.append("### Security — Medium / Low")
+            lines.append("")
+            for f in medium_low:
+                lines.append(f"**`{f['file']}`** - {f['title']}")
+                lines.append(f"- **Severity:** `{f['severity'].value.upper()}`")
+                if f.get("line"):
+                    lines.append(f"- **Line:** `{f['line']}`")
+                lines.append(f"- **Issue:** {f['description']}")
+                lines.append(f"- **Fix:** {f['suggestion']}")
+                lines.append("")
+    
+    if style:
+        lines.append("### Style & Quality")
         lines.append("")
-        for f in medium_low:
+        for f in style:
             lines.append(f"**`{f['file']}`** - {f['title']}")
             lines.append(f"- **Severity:** `{f['severity'].value.upper()}`")
-            if f.get("line"):
-                lines.append(f"- **Line:** `{f['line']}`")
             lines.append(f"- **Issue:** {f['description']}")
             lines.append(f"- **Fix:** {f['suggestion']}")
             lines.append("")
+    
+    if not security and not style:
+        lines.append(" No issues found.")
+        lines.append("")
 
     lines.append("---")
-    lines.append(f"* AI Security Agent {len(findings)} finding(s)*")
+    lines.append(f"* AI Security Agent {len(security + style)} finding(s)*")
 
     return chr(10).join(lines)
 
@@ -94,17 +109,16 @@ async def supervisor_node(state: PRReviewState):
     Synthesizes findings → decides review outcome → posts to GitHub.
     """
     security = state["security_findings"] or []
+    style = state["style_findings"] or []
+    all_findings = security + style
 
     # Decide review outcome based on severity
-    review_decsion = _decide_review_outcome(security)
+    review_decsion = _decide_review_outcome(all_findings)
 
     # Format unified review body
-    review_body = _format_review_body(security)
+    review_body = _format_review_body(security, style)
 
-    for finding in security:
-        logger.info(f"PR review inline comment line number - {finding["line"]}")
-
-    inline_comments = _build_inline_comments(security)
+    inline_comments = _build_inline_comments(all_findings)
 
     #Post to Github via MCP
     await github_mcp_session.invoke_tool(
@@ -133,11 +147,16 @@ def supervisor_pipeline():
 
     # Register agent nodes
     graph.add_node("security_agent", security_agent_node)
+    graph.add_node("style_agent", style_agent_node)
     graph.add_node("supervisor", supervisor_node)
 
     # Wire edges
     graph.add_edge(START, "security_agent")
+    graph.add_edge(START, "style_agent")
+
     graph.add_edge("security_agent", "supervisor")
+    graph.add_edge("style_agent", "supervisor")
+
     graph.add_edge("supervisor", END)
 
     compiled = graph.compile()
