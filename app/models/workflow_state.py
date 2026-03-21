@@ -9,12 +9,11 @@ from typing import TypedDict, Optional, Annotated
 from enum import Enum
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
-from app.utils.agent_helper import merge_dicts
+from operator import add
 
-class ReviewDecision(str, Enum):
-    APPROVED = "APPROVED"
-    REQUEST_CHANGES = "REQUEST_CHANGES"
-    COMMENT = "COMMENT"
+def merge_dicts(a:dict | None, b:dict | None) -> dict:
+    """Merge two dict - b override a keys"""
+    return {**(a or {}), **(b or {})}
 
 class Severity(str, Enum):
     """
@@ -25,13 +24,6 @@ class Severity(str, Enum):
     MEDIUM   = "medium"
     LOW      = "low"
     INFO     = "info"
-
-class Category(str, Enum):
-    """Finding category — which specialist agent produced it."""
-    SECURITY     = "security"
-    STYLE        = "style"
-    PERFORMANCE  = "performance"
-    TEST_COVERAGE = "test_coverage"
 
 class ReviewDecision(str, Enum):
     """
@@ -45,12 +37,12 @@ class ReviewDecision(str, Enum):
 class AgentFinding(TypedDict):
     """A single finding from a specialist agent"""
     severity: Severity  # enum — set by each agent
-    category: Category  # enum — set by each agent
     file: str           # filename where the issue was found
     line: Optional[str] # line number or range if available
     title: str          # short one-line summary
     description: str    # details explanation
-    suggestion: str    # concrete fix recommendation
+    suggestion: str     # concrete fix recommendation
+    status: str         # status of the issue founded
 
 class PRReviewState(TypedDict):
     """
@@ -76,6 +68,9 @@ class PRReviewState(TypedDict):
     style_findings: Optional[list[AgentFinding]]
     test_findings: Optional[list[AgentFinding]]
     analyzed_file_shas:  Annotated[dict[str, str], merge_dicts]
+    security_issues_identified: Optional[list[AgentFinding]]                       # List of Issue object combing every file's all issues in Security agent
+    style_issues_identified: Optional[list[AgentFinding]]                          # List of Issue object combing every file's all issues in Style agent
+
     # Supervisor output
-    final_review: Optional[str]     # markdown summary posted to GitHub
-    review_decision: Optional[ReviewDecision]  # enum — maps to GitHub API value
+    final_review: Optional[str]                                                     # markdown summary posted to GitHub
+    review_decision: Optional[ReviewDecision]                                       # enum — maps to GitHub API value

@@ -2,6 +2,7 @@ from langchain_ollama import ChatOllama
 from app.core.configs.settings import settings
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
+from app.models.workflow_state import AgentFinding
 from typing import Any
 import json
 import logging
@@ -96,6 +97,53 @@ def format_files_for_llm(files:list) -> str:
         sections.append(section)
     return "\n".join(sections)
 
+def format_prev_issues(files:list, issues_identified: list[AgentFinding],) -> str:
+    """
+    Render issues from the previous run into a structured string for LLM context.
+    The LLM uses this + the current diff to determine what is resolved,
+    what persists, and what is new.
+    """
+    if not issues_identified:
+        return ""
+
+    filenames_in_run = {f.get("filename", "") for f in files}
+
+    relevant_issues = [
+        issue for issue in issues_identified
+        if issue["file"] in filenames_in_run
+    ]
+
+    if not relevant_issues:
+        return ""
+    
+    # Group by file for readable output
+    issues_by_file: dict[str, list] = {}
+    for issue in relevant_issues:
+        issues_by_file.setdefault(issue["filename"], []).append(issue)
+
+    sections = []
+    for filename, file_issues in issues_by_file.items():
+        section_lines = [f"### Previously posted issues in `{filename}`"]
+        for i, issue in enumerate(file_issues, 1):
+            line_ref = f" (line {issue['line']})" if issue.get("line") else ""
+            section_lines.append(
+                f"{i}. **{issue['title']}**{line_ref}"
+                f"\n. {issue['description']}"
+            )
+        sections.append(chr(10).join(section_lines))
+    
+    if not sections:
+        return ""
+    
+    header = (
+        "## Context From Previous Review\n"
+        "Issues already posted. For each one: if still present in the current diff "
+        "→ set status=persists and omit. If no longer present → mark status=resolved"
+        "Only report genuinely new issues and set status=new\n\n"
+    )
+
+    return header + "\n\n".join(sections)
+
 def find_line_in_diff(patch:str, snippet:str) -> int | None:
     clean_snippet = snippet.lstrip("+").strip()
     current_line = 0
@@ -124,10 +172,6 @@ async def fetch_file_contents(owner, repo, pr_number):
     logger.info(f"files ======= {files}")
     return files
 
-def merge_dicts(a:dict | None, b:dict | None) -> dict:
-    """Merge two dict - b override a keys"""
-    return {**(a or {}), **(b or {})}
-
 def split_files_by_sha(
     files: list,
     prev_shas: dict[str, str]
@@ -154,3 +198,24 @@ def updated_shas(prev_shas:dict, files:list) -> dict:
         **prev_shas,
         **{f.get("filename"): f.get("sha", "") for f in files}
     }
+
+def build_agent_prompt(
+    owner:str,
+    repo:str,
+    pr_number:str,
+    diff_context:str,
+    files:list,
+    issues_identified:list[dict],
+    focus:str,
+) -> str:
+    prompt = (
+        f"Review this Pull Request for {focus}:\n\n"
+        f"PR: {owner}/{repo}/#{pr_number}\n\n"
+        f"## Current Diff\n{diff_context}"
+    )
+
+    prev_context = format_prev_issues(files, issues_identified)
+    if prev_context:
+        prompt += prev_context
+
+    return prompt

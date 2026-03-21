@@ -14,98 +14,9 @@ from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
 from app.workflow.style_agent import style_agent_node
 from langgraph.checkpoint.memory import InMemorySaver
-
+from app.utils.supervisor_helper import decide_review_outcome, format_review_body, build_inline_comments
 logger = logging.getLogger(__name__)
 checkpointer = InMemorySaver()
-
-def _decide_review_outcome(findings: list) -> ReviewDecision:
-    # if not findings:
-    #     return ReviewDecision.APPROVE
-    if not findings:
-        return ReviewDecision.COMMENT
-    # severities = [f["severity"] for f in findings]
-    # has_high_or_above = any(s.value in ("critical", "high") for s in severities)
-    # if has_high_or_above:
-    #     return ReviewDecision.REQUEST_CHANGES
-    return ReviewDecision.COMMENT
-
-def _format_review_body(security: list, style: list) -> str:
-    lines = []
-    lines.append("## Security & Style Review")
-    lines.append("")
-
-    if security:
-        critical_high = [f for f in security if f["severity"] in ("critical", "high")]
-        medium_low    = [f for f in security if f["severity"] in ("medium", "low", "info")]
-
-        if critical_high:
-            lines.append("### Security — Critical / High")
-            lines.append("")
-            for f in critical_high:
-                lines.append(f"**`{f['file']}`** - {f['title']}")
-                lines.append(f"- **Severity:** `{f["severity"].upper()}`")
-                if f.get("line"):
-                    lines.append(f"- **Line:** `{f['line']}`")
-                lines.append(f"- **Issue:** {f['description']}")
-                lines.append(f"- **Fix:** {f['suggestion']}")
-                lines.append("")
-
-        if medium_low:
-            lines.append("### Security — Medium / Low")
-            lines.append("")
-            for f in medium_low:
-                lines.append(f"**`{f['file']}`** - {f['title']}")
-                lines.append(f"- **Severity:** `{f["severity"].upper()}`")
-                if f.get("line"):
-                    lines.append(f"- **Line:** `{f['line']}`")
-                lines.append(f"- **Issue:** {f['description']}")
-                lines.append(f"- **Fix:** {f['suggestion']}")
-                lines.append("")
-    
-    if style:
-        lines.append("### Style & Quality")
-        lines.append("")
-        for f in style:
-            lines.append(f"**`{f['file']}`** - {f['title']}")
-            lines.append(f"- **Severity:** `{f["severity"].upper()}`")
-            lines.append(f"- **Issue:** {f['description']}")
-            lines.append(f"- **Fix:** {f['suggestion']}")
-            lines.append("")
-    
-    if not security and not style:
-        lines.append(" No issues found.")
-        lines.append("")
-
-    lines.append("---")
-    lines.append(f"* AI Security Agent {len(security + style)} finding(s)*")
-
-    return chr(10).join(lines)
-
-def _build_inline_comments(findings: list) -> list[dict]:
-    """
-    Build inline comment objects for findings that have line numbers.
-    Findings without line number appear in the overall body only.
-    """
-    comments = []
-    
-    for f in findings:
-        if not f.get("line"):
-            continue
-        try:
-            line = int(str(f["line"]).split("-")[0])
-        except (ValueError, TypeError):
-            continue
-
-        comments.append({
-            "path": f["file"],
-            "line": line,
-            "body": (
-                f"**{f['title']}**(`{f['severity'].upper()}`)\n\n"
-                f"**Issue:** {f['description']}\n\n"
-                f"**Suggestion:** {f['suggestion']}"
-            )
-        })
-    return comments
 
 async def supervisor_node(state: PRReviewState):
     """
@@ -114,10 +25,14 @@ async def supervisor_node(state: PRReviewState):
     """
     security = state["security_findings"] or []
     style = state["style_findings"] or []
-    all_findings = security + style
+
+    all_new = security + style
+
+    logger.info(
+        f"Supervisor — {len(all_new)} new findings")
 
     # Skip posting if no findings
-    if not all_findings:
+    if not all_new:
         logger.info("No findings — skipping review post")
         return {
             "final_review":    None,
@@ -125,15 +40,13 @@ async def supervisor_node(state: PRReviewState):
         }
 
     # Decide review outcome based on severity
-    review_decsion = _decide_review_outcome(all_findings)
-
-    # Format unified review body
-    review_body = _format_review_body(security, style)
-
-    inline_comments = _build_inline_comments(all_findings)
+    review_decsion = decide_review_outcome(all_new)
+    review_body = format_review_body(security, style)
+    inline_comments = build_inline_comments(all_new)
 
     #Post to Github via MCP
-    await github_mcp_session.invoke_tool(
+    try:
+        await github_mcp_session.invoke_tool(
         MCPTool.CREATE_PULL_REQUEST_REVIEW,
         owner=state["owner"],
         repo=state["repo"],
@@ -141,11 +54,18 @@ async def supervisor_node(state: PRReviewState):
         body=review_body,
         event=review_decsion.value,
         comments=inline_comments, 
-    )
-
+        )
+        logger.info(
+            f"✅ Review posted — {review_decsion.value}, "
+            f"{len(all_new)} new, {len(inline_comments)} inline comments"
+        )
+    except Exception as e:
+        logger.error(f"Failed to post review: {e}")
+        raise
+    
     return {
         "final_review": review_body,
-        "review_decision": review_decsion
+        "review_decision": review_decsion,
     }
 
 def supervisor_pipeline():

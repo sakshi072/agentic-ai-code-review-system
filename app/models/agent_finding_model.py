@@ -1,5 +1,10 @@
 from pydantic import BaseModel, Field
 from app.models.workflow_state import Severity
+from enum import Enum
+class FindingStatus(str, Enum):
+    NEW                    = "new"
+    PERSISTS               = "persists"        # was posted, still exists
+    RESOLVED               = "resolved"        # was posted, no longer exists
 
 class AgentFindingSchema(BaseModel):
     """Single agent finding — schema enforced by LLM structured output."""
@@ -12,12 +17,23 @@ class AgentFindingSchema(BaseModel):
     title:       str      = Field(description="Short one-line summary of the issue")
     description: str      = Field(description="Clear explanation of why this is a security risk")
     suggestion:  str      = Field(description="Concrete fix recommendation with code example if possible")
+    status: FindingStatus = Field(
+        description=(
+            "new — not in previous review. "
+            "persists — was in previous review, still exists in current diff. "
+            "resolved — was in previous review, no longer exists in current diff."
+        )
+    )
 
 class SecurityResponseSchema(BaseModel):
     """Top-level structured response from the security agent LLM"""
     findings: list[AgentFindingSchema] = Field(
         default_factory=list,
-        description="List of security findings. Empty list if no issues found."
+        description=(
+            "ALL security issue findings — new, persisting, and resolved. "
+            "Include every previously posted issue with its current status. "
+            "Do not omit anything from the previous review."
+        )
     )
 
 class StyleFindingSchema(BaseModel):
@@ -32,10 +48,20 @@ class StyleFindingSchema(BaseModel):
     title:       str = Field(description="Short one-line summary of the style issue")
     description: str = Field(description="Clear explanation of why this is a style or quality problem")
     suggestion:  str = Field(description="Concrete improvement with example if possible")
-
+    status: FindingStatus = Field(
+        description=(
+            "new — not in previous review. "
+            "persists — was in previous review, still exists in current diff. "
+            "resolved — was in previous review, no longer exists in current diff."
+        )
+    )
 
 class StyleResponseSchema(BaseModel):
-    findings: list[StyleFindingSchema] = Field(
+    findings: list[AgentFindingSchema] = Field(
         default_factory=list,
-        description="List of style findings. Empty list if no issues found."
+        description=(
+            "ALL Style issue findings — new, persisting, and resolved. "
+            "Include every previously posted issue with its current status. "
+            "Do not omit anything from the previous review."
+        )
     )

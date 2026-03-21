@@ -1,4 +1,4 @@
-from app.models.workflow_state import PRReviewState, AgentFinding, Category
+from app.models.workflow_state import PRReviewState, AgentFinding
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
 from app.utils.agent_helper import (
@@ -7,7 +7,8 @@ from app.utils.agent_helper import (
     find_line_in_diff, 
     fetch_file_contents, 
     split_files_by_sha,
-    updated_shas
+    updated_shas,
+    build_agent_prompt
 )
 from app.models.agent_finding_model import StyleResponseSchema
 from app.core.prompts.style_agent_prompt import STYLE_AGENT_SYSTEM_PROMPT
@@ -64,22 +65,26 @@ async def style_agent_node(state:PRReviewState):
             "messages": state["messages"]
             }
     
+    prompt = build_agent_prompt(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        diff_context=diff_context,
+        files = to_analyze,
+        issues_identified= state.get("style_issues_identified") or [],
+        focus = "style discrepancies",
+    )
+    
     # Call structured LLM
     structured_llm = build_llm("qwen3:8b", 0, "http://localhost:11434").with_structured_output(
         StyleResponseSchema
     )
 
-    messages = [
-        SystemMessage(content=STYLE_AGENT_SYSTEM_PROMPT),
-        HumanMessage(content=(
-            f"Review this Pull Request for style consistencies:\n\n"
-            f"PR: {owner}/{repo}/{pr_number}\n\n"
-            f"{diff_context}"
-        ))
-    ]
-
     try:
-        response: StyleResponseSchema = await structured_llm.ainvoke(messages)
+        response: StyleResponseSchema = await structured_llm.ainvoke([
+            SystemMessage(content=STYLE_AGENT_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ])
         logger.info(f"Structured response received - {len(response.findings)} findings")
     except Exception as e:
         logger.error(f"Structured LLM call failed: {e}")
@@ -91,7 +96,6 @@ async def style_agent_node(state:PRReviewState):
     findings:list[AgentFinding] = [
         AgentFinding(
             severity = finding.severity.value,
-            category = Category.STYLE.value,
             file = finding.file,
             line = find_line_in_diff(
                 file_patches.get(finding.file, ""),
@@ -100,17 +104,27 @@ async def style_agent_node(state:PRReviewState):
             title = finding.title,
             description = finding.description.replace("\\\\n", "\\n"),
             suggestion = finding.suggestion.replace("\\\\n", "\\n"),
+            status = finding.status.value,
         )
         for finding in response.findings
     ]
 
     logger.info(f" Style agent complete — {len(findings)} findings")
 
+    # Split by status
+    to_post = [f for f in findings if f["status"] == "new"]
+    open_issues = [f for f in findings if f["status"] == ("new", "persists")]
+    resolved = [f for f in findings if f["status"] == "resolved"]
+
+    for r in resolved:
+        logger.info(f"  ✅ Resolved: {r['file']} — {r['title']}")
+
     for f in findings:
         logger.info(f"   [{f['severity'].upper()}] {f['file']}: {f['title']}")
 
     return {
-        "style_findings": findings,
+        "style_findings": to_post,
+        "style_issues_identified": open_issues,
         "analyzed_file_shas": updated_shas(prev_shas, files),
         "messages": state["messages"]
     }
