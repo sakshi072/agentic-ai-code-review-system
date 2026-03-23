@@ -12,4 +12,9 @@ class Settings(BaseSettings):
     DEFAULT_AGENT_TEMPERATURE:float = 0
     DEFAULT_AGENT_BASE_URL:str="http://localhost:11434"
 
+    #Langfuse
+    LANGFUSE_SECRET_KEY:str
+    LANGFUSE_PUBLIC_KEY:str
+    LANGFUSE_BASE_URL:str
+
 settings = Settings()
