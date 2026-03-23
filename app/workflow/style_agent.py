@@ -12,6 +12,7 @@ from app.utils.agent_helper import (
 )
 from app.models.agent_finding_model import StyleResponseSchema
 from app.core.prompts.style_agent_prompt import STYLE_AGENT_SYSTEM_PROMPT
+from app.tools.linter import run_linters
 from langchain_core.messages import SystemMessage, HumanMessage
 import logging
 
@@ -65,6 +66,9 @@ async def style_agent_node(state:PRReviewState):
             "messages": state["messages"]
             }
     
+    linter_output = await run_linters(to_analyze, owner=owner, repo=repo, head_sha=state["head_sha"])
+    logger.info(f"Linting complete — {len(linter_output)} files with output")
+    
     prompt = build_agent_prompt(
         owner=owner,
         repo=repo,
@@ -73,6 +77,7 @@ async def style_agent_node(state:PRReviewState):
         files = to_analyze,
         issues_identified= state.get("style_issues_identified") or [],
         focus = "style discrepancies",
+        linter_output=linter_output
     )
     
     # Call structured LLM

@@ -30,6 +30,7 @@ def start_supervisor(pr_data:PRData):
         "owner": pr_data.repo_owner,
         "repo": pr_data.repo_name,
         "pr_number": pr_data.number,
+        "head_sha": pr_data.head_sha,
         "messages": [HumanMessage(content=f"Review PR #{pr_data.number} commit {pr_data.head_sha[:7]}")],
     }
 

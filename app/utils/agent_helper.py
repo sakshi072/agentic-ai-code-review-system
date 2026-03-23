@@ -3,11 +3,13 @@ from app.core.configs.settings import settings
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
 from app.models.workflow_state import AgentFinding
-from typing import Any
+from typing import Any, Optional
 import json
 import logging
 import codecs 
 import re
+import base64
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -207,15 +209,85 @@ def build_agent_prompt(
     files:list,
     issues_identified:list[dict],
     focus:str,
+    linter_output:Optional[dict[str,str]] = {}
 ) -> str:
     prompt = (
         f"Review this Pull Request for {focus}:\n\n"
         f"PR: {owner}/{repo}/#{pr_number}\n\n"
-        f"## Current Diff\n{diff_context}"
     )
+    
+    if linter_output:
+        prompt += "## Static Linter Output\n"
+        prompt += "These are verified violations - include all as findings.\n\n"
+        for filename, output in linter_output.items():
+            prompt += f"### {filename}\n```\n{output}\n```\n\n"
+    prompt += f"## Current Diff\n{diff_context}"
 
     prev_context = format_prev_issues(files, issues_identified)
     if prev_context:
         prompt += prev_context
 
     return prompt
+
+# async def fetch_full_file(owner: str, repo: str, filepath: str, ref:str) -> str:
+#     """Fetch full file content via GitHub MCP get_file_contents tool."""
+#     raw = await github_mcp_session.invoke_tool(
+#         MCPTool.GET_FILE_CONTENTS,
+#         owner=owner,
+#         repo=repo,
+#         path=filepath,
+#         ref=ref
+#     )
+
+#     if isinstance(raw, list) and raw:
+#         raw = raw[0].get("text", "")
+#     if isinstance(raw, str):
+#         try:
+#             data = json.loads(raw)
+#             content = data.get("content", "")
+#             if not content:
+#                 logger.warning(f"fetch_full_file: empty content for {filepath}")
+#                 return ""
+
+#             # Try base64 decode first, fall back to plain text
+#             try:
+#                 decoded = base64.b64decode(
+#                     content.replace("\n", "")
+#                 ).decode("utf-8")
+#                 logger.info(f"fetch_full_file: base64 decoded {filepath} — {len(decoded)} chars, {decoded.count(chr(10))} lines")
+#                 return decoded
+#             except Exception:
+#                 # Content is already plain text
+#                 logger.info(f"fetch_full_file: plain text {filepath} — {len(content)} chars, {content.count(chr(10))} lines")
+#                 return content
+
+#         except Exception as e:
+#             logger.error(f"fetch_full_file failed for {filepath}: {e}")
+#             return ""
+#     return ""
+
+async def fetch_full_file(owner: str, repo: str, filepath: str, ref: str) -> str:
+    """Fetch file content directly from GitHub REST API at a specific ref."""
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filepath}"
+    
+    headers = {
+        "Authorization": f"Bearer {settings.GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    params = {"ref": ref}
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+    
+    content = data.get("content", "")
+    if not content:
+        logger.warning(f"fetch_full_file: empty content for {filepath} at {ref}")
+        return ""
+    
+    decoded = base64.b64decode(content.replace("\n", "")).decode("utf-8")
+    logger.info(f"fetch_full_file: {filepath} at {ref[:7]} — {len(decoded)} chars, {decoded.count(chr(10))} lines")
+    return decoded
+

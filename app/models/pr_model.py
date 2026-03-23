@@ -141,7 +141,7 @@ class PRData(BaseModel):
             "repo": self.repo_full_name,
             "base_branch": self.base_branch,
             "head_branch": self.head_branch,
-            "head_sha": self.head_sha[:8],
+            "head_sha": self.head_sha,
             "draft": self.draft,
             "commits": self.commits,
             "additions": self.additions,

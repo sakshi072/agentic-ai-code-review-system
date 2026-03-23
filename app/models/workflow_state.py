@@ -59,6 +59,7 @@ class PRReviewState(TypedDict):
     owner: str
     repo: str
     pr_number: int
+    head_sha: str
 
     # Conversation messages for LangGraph ReAct agents
     messages: Annotated[list[BaseMessage], add_messages]
