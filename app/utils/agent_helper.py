@@ -121,7 +121,7 @@ def format_prev_issues(files:list, issues_identified: list[AgentFinding],) -> st
     # Group by file for readable output
     issues_by_file: dict[str, list] = {}
     for issue in relevant_issues:
-        issues_by_file.setdefault(issue["filename"], []).append(issue)
+        issues_by_file.setdefault(issue["file"], []).append(issue)
 
     sections = []
     for filename, file_issues in issues_by_file.items():
@@ -140,7 +140,7 @@ def format_prev_issues(files:list, issues_identified: list[AgentFinding],) -> st
     header = (
         "## Context From Previous Review\n"
         "Issues already posted. For each one: if still present in the current diff "
-        "→ set status=persists and omit. If no longer present → mark status=resolved"
+        "→ set status=persists and omit. If no longer present → mark status=resolved. "
         "Only report genuinely new issues and set status=new\n\n"
     )
 
@@ -228,43 +228,6 @@ def build_agent_prompt(
         prompt += prev_context
 
     return prompt
-
-# async def fetch_full_file(owner: str, repo: str, filepath: str, ref:str) -> str:
-#     """Fetch full file content via GitHub MCP get_file_contents tool."""
-#     raw = await github_mcp_session.invoke_tool(
-#         MCPTool.GET_FILE_CONTENTS,
-#         owner=owner,
-#         repo=repo,
-#         path=filepath,
-#         ref=ref
-#     )
-
-#     if isinstance(raw, list) and raw:
-#         raw = raw[0].get("text", "")
-#     if isinstance(raw, str):
-#         try:
-#             data = json.loads(raw)
-#             content = data.get("content", "")
-#             if not content:
-#                 logger.warning(f"fetch_full_file: empty content for {filepath}")
-#                 return ""
-
-#             # Try base64 decode first, fall back to plain text
-#             try:
-#                 decoded = base64.b64decode(
-#                     content.replace("\n", "")
-#                 ).decode("utf-8")
-#                 logger.info(f"fetch_full_file: base64 decoded {filepath} — {len(decoded)} chars, {decoded.count(chr(10))} lines")
-#                 return decoded
-#             except Exception:
-#                 # Content is already plain text
-#                 logger.info(f"fetch_full_file: plain text {filepath} — {len(content)} chars, {content.count(chr(10))} lines")
-#                 return content
-
-#         except Exception as e:
-#             logger.error(f"fetch_full_file failed for {filepath}: {e}")
-#             return ""
-#     return ""
 
 async def fetch_full_file(owner: str, repo: str, filepath: str, ref: str) -> str:
     """Fetch file content directly from GitHub REST API at a specific ref."""
