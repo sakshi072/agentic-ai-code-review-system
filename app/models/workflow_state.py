@@ -64,17 +64,23 @@ class PRReviewState(TypedDict):
     # Conversation messages for LangGraph ReAct agents
     messages: Annotated[list[BaseMessage], add_messages]
 
-    # Ingestion node states
-    # Files that have changed SHA since the last run — agents read these
-    files_to_analyze: Optional[list[dict]]
-    # Pre-rendered diff string ready for LLM consumption — agents read this
-    diff_context: Optional[str]
-    # Raw patch per filename — used by agents for find_line_in_diff
-    file_patches: Optional[dict[str,str]]
+    # Ingestion node output
+    # Each chunk is a self-contained payload passed directly via Send API:
+    #   {
+    #     "files":        list[dict],   # files in this chunk
+    #     "diff_context": str,          # pre-rendered LLM string for this chunk
+    #     "file_patches": dict[str,str] # raw patch per filename for line resolution
+    #   }
+    chunks: Optional[list[dict]]
+    
+    # Per-chunk linter results — keyed by chunk index (int).
+    # Stored separately from chunks so the router can forward it exclusively
+    # to style_agent Sends; security_agent never receives it.
+    linter_outputs: Optional[dict[int, dict[str, str]]]
 
     # Agent Finding - each agent writes its own key
-    security_findings: Optional[list[AgentFinding]]
-    style_findings: Optional[list[AgentFinding]]
+    security_findings: Annotated[list[AgentFinding], add]
+    style_findings: Annotated[list[AgentFinding], add]
     
     # SHA map — merged across runs so unchanged files are skipped
     analyzed_file_shas:  Annotated[dict[str, str], merge_dicts]

@@ -3,11 +3,7 @@ from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
 from app.utils.agent_helper import (
     build_llm, 
-    format_files_for_llm, 
     find_line_in_diff, 
-    fetch_file_contents, 
-    split_files_by_sha,
-    updated_shas,
     build_agent_prompt
 )
 from app.models.agent_finding_model import StyleResponseSchema
@@ -18,37 +14,42 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def style_agent_node(state:PRReviewState):
+async def style_agent_node(payload:dict):
     """
-    LangGraph node — runs style and quality analysis on the PR.
+    LangGraph node — runs style and quality analysis on one diff chunk.
 
-    Flow:
-        1. Fetch changed files via MCP get_pull_request_files
-        2. Build structured prompt with the full diff
-        3. Call structured LLM with style-focused system prompt
-        4. Map findings into state
+    Receives (via Send payload):
+        owner, repo, pr_number      — PR identity
+        chunk                       — {files, diff_context, file_patches}
+        linter_output               — pre-computed linter results from ingestion
+                                      (scoped to this chunk's files only)
+        style_issues_identified     — open issues from previous runs
+ 
+    Returns:
+        style_findings           — new findings only (appended via add reducer)
+        style_issues_identified  — updated open issue list for this chunk's files
     """
-    owner = state["owner"]
-    repo = state["repo"]
-    pr_number = state["pr_number"]
+    owner     = payload["owner"]
+    repo      = payload["repo"]
+    pr_number = payload["pr_number"]
 
     logger.info(f"Style agent starting - {owner}/{repo}/{pr_number}")
    
     # Read ingestion outputs from state
-    to_analyze   = state.get("files_to_analyze") or []
-    diff_context = state.get("diff_context") or ""
-    file_patches = state.get("file_patches") or {}
+    chunk = payload["chunk"]
+    to_analyze = chunk["files"]
+    diff_context = chunk["diff_context"]
+    file_patches = chunk["file_patches"]
  
-    if not to_analyze or not diff_context:
-        logger.info("Style agent — nothing to analyze (ingestion found no changes)")
-        return {
-            "style_findings": [],
-            "messages": state["messages"],
-        }
+    # Linter output pre-computed by ingestion node — scoped to this chunk's files
+    linter_output = payload.get("linter_output") or {}
+    issues_identified = payload.get("style_issues_identified") or []
     
-    # Run linters 
-    linter_output = await run_linters(to_analyze, owner=owner, repo=repo, head_sha=state["head_sha"])
-    logger.info(f"Linting complete — {len(linter_output)} files with output")
+    logger.info(
+        f"Style agent starting — {owner}/{repo}/#{pr_number} "
+        f"({len(to_analyze)} files in chunk, "
+        f"{len(linter_output)} files with linter output)"
+    )
     
     prompt = build_agent_prompt(
         owner=owner,
@@ -56,7 +57,7 @@ async def style_agent_node(state:PRReviewState):
         pr_number=pr_number,
         diff_context=diff_context,
         files = to_analyze,
-        issues_identified= state.get("style_issues_identified") or [],
+        issues_identified= issues_identified,
         focus = "style discrepancies",
         linter_output=linter_output
     )
@@ -74,7 +75,10 @@ async def style_agent_node(state:PRReviewState):
         logger.info(f"Structured response received - {len(response.findings)} findings")
     except Exception as e:
         logger.error(f"Structured LLM call failed: {e}")
-        return {"style_findings": [], "messages": state["messages"]}
+        return {
+            "style_findings": [],
+            "style_issues_identified": issues_identified,
+        }
 
     # Map pydantic -> AgentFinding TypedDict
     findings:list[AgentFinding] = [
@@ -95,18 +99,9 @@ async def style_agent_node(state:PRReviewState):
 
     logger.info(f" Style agent complete — {len(findings)} findings")
 
-    # SHA proved these files didn't change — issues still open by definition
-    analyzed_filenames = {f.get("filename") for f in to_analyze}
-    carried_over = [
-        issue for issue in (state.get("style_issues_identified") or [])
-        if issue["file"] not in analyzed_filenames
-    ]
-
     # Split by status
     to_post = [f for f in findings if f["status"] == "new"]
-    open_issues = [f for f in findings if f["status"] in ("new", "persists")]
     resolved = [f for f in findings if f["status"] == "resolved"]
-    merged_open_issues = open_issues + carried_over
 
     for r in resolved:
         logger.info(f"  ✅ Resolved: {r['file']} — {r['title']}")
@@ -115,9 +110,7 @@ async def style_agent_node(state:PRReviewState):
         logger.info(f"   [{f['severity'].upper()}] {f['file']}: {f['title']}")
 
     return {
-        "style_findings":          to_post,
-        "style_issues_identified": merged_open_issues,
-        "messages":                state["messages"],
+        "style_findings": to_post
     }
 
 

@@ -4,18 +4,20 @@ PR Review Pipeline — LangGraph graph wiring the agent pipeline.
 Current state: single security agent node.
 
 Graph structure:
-    START → security_agent → END
+    START → Ingestion -> (security_agent + style_agent) -> Supervisor → END
 """
 import logging
 from langgraph.graph import StateGraph, START, END
-from app.models.workflow_state import PRReviewState, ReviewDecision
+from app.models.workflow_state import PRReviewState
 from app.workflow.security_agent import security_agent_node
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
 from app.workflow.style_agent import style_agent_node
 from app.workflow.ingestion_node import ingestion_node
+from app.workflow.dedup_node import dedup_node
 from langgraph.checkpoint.memory import InMemorySaver
 from app.utils.supervisor_helper import decide_review_outcome, format_review_body, build_inline_comments
+from app.workflow.chunk_router import chunk_router
 logger = logging.getLogger(__name__)
 checkpointer = InMemorySaver()
 
@@ -82,15 +84,17 @@ def supervisor_pipeline():
     graph.add_node("ingestion", ingestion_node)
     graph.add_node("security_agent", security_agent_node)
     graph.add_node("style_agent", style_agent_node)
+
     graph.add_node("supervisor", supervisor_node)
 
     # Wire edges
     # Ingestion runs first, alone
     graph.add_edge(START, "ingestion")
 
-    # Both agents fan out from ingestion in parallel
-    graph.add_edge("ingestion", "security_agent")
-    graph.add_edge("ingestion", "style_agent")
+    # chunk_router is a conditional edge — returns Send[] for dynamic fan-out.
+    # LangGraph dispatches all Send objects concurrently. Each agent node
+    # runs once per Send, findings accumulate via the add reducer on state.
+    graph.add_conditional_edges("ingestion", chunk_router)
 
     # Both agents converge on supervisor
     graph.add_edge("security_agent", "supervisor")

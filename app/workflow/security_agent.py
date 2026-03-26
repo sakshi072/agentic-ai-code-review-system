@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Security agent node
 # ---------------------------------------------------------------------------
-async def security_agent_node(state: PRReviewState) -> dict:
+async def security_agent_node(payload:dict) -> dict:
     """
     LangGraph node — runs security analysis on the PR.
     Flow:
@@ -24,23 +24,24 @@ async def security_agent_node(state: PRReviewState) -> dict:
         3. Call LLM with security-focused system prompt
         4. Parse JSON findings and write to state
     """
-    owner = state["owner"]
-    repo = state["repo"]
-    pr_number = state["pr_number"]
+    owner = payload["owner"]
+    repo = payload["repo"]
+    pr_number = payload["pr_number"]
 
     logger.info(f"Security agent starting - {owner}/{repo}/{pr_number}")
     
     # Read ingestion outputs from state
-    to_analyze   = state.get("files_to_analyze") or []
-    diff_context = state.get("diff_context") or ""
-    file_patches = state.get("file_patches") or {}
+    chunk = payload["chunk"]
+    to_analyze   = chunk["files"]
+    diff_context = chunk["diff_context"]
+    file_patches = chunk["file_patches"]
     
-    if not to_analyze or not diff_context:
-        logger.info("Security agent — nothing to analyze (ingestion found no changes)")
-        return {
-            "security_findings": [],
-            "messages": state["messages"],
-        }
+    issues_identified = chunk.get("security_issues_identified") or []
+
+    logger.info(
+        f"Security agent starting — {owner}/{repo}/#{pr_number} "
+        f"({len(to_analyze)} files in chunk)"
+    )
     
     prompt = build_agent_prompt(
         owner=owner,
@@ -48,7 +49,7 @@ async def security_agent_node(state: PRReviewState) -> dict:
         pr_number=pr_number,
         diff_context=diff_context,
         files = to_analyze,
-        issues_identified= state.get("security_issues_identified") or [],
+        issues_identified= issues_identified,
         focus = "security vulnerabilities",
     )
 
@@ -68,7 +69,7 @@ async def security_agent_node(state: PRReviewState) -> dict:
         logger.error(f"Security agent — structured LLM call failed: {e}")
         return {
             "security_findings": [],
-            "messages": state["messages"],
+            "security_issues_identified": issues_identified,
         }
 
     # Map pydantic -> AgentFinding TypedDict
@@ -92,9 +93,8 @@ async def security_agent_node(state: PRReviewState) -> dict:
 
     # Split by status
     to_post = [f for f in findings if f["status"] == "new"]
-    open_issues = [f for f in findings if f["status"] in ("new", "persists")]
     resolved = [f for f in findings if f["status"] == "resolved"]
-    
+
     for r in resolved:
         logger.info(f"  ✅ Resolved: {r['file']} — {r['title']}")
 
@@ -102,7 +102,5 @@ async def security_agent_node(state: PRReviewState) -> dict:
         logger.info(f"  [{f['severity'].upper()}] {f['file']}: {f['title']}")
 
     return {
-        "security_findings":          to_post,
-        "security_issues_identified": open_issues,
-        "messages":                   state["messages"],
+        "security_findings": to_post,
     }

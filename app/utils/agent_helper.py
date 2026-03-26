@@ -218,14 +218,29 @@ def build_agent_prompt(
     
     if linter_output:
         prompt += "## Static Linter Output\n"
-        prompt += "These are verified violations - include all as findings.\n\n"
+        prompt += (
+            "These are verified violations. Each entry includes the exact "
+            "offending line. For each violation you MUST:\n"
+            "1. Create one finding per violation — do not consolidate\n"
+            "2. Quote the offending line verbatim in the description\n"
+            "3. Include the line number from the violation in your finding\n"
+            "4. Show corrected code in the suggestion\n\n"
+        )
         for filename, output in linter_output.items():
             prompt += f"### {filename}\n```\n{output}\n```\n\n"
     prompt += f"## Current Diff\n{diff_context}"
 
     prev_context = format_prev_issues(files, issues_identified)
+    
     if prev_context:
         prompt += prev_context
+    else:
+        prompt += (
+            "\n\n## Previous Review\n"
+            "This is the first review of this PR — there are no previously posted issues. "
+            "Mark ALL findings as status=new. "
+            "Do NOT mark anything as resolved or persists."
+        )
 
     return prompt
 

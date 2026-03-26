@@ -5,6 +5,7 @@ import json
 import logging
 from typing import List
 from app.utils.agent_helper import fetch_full_file
+import re 
 
 logger = logging.getLogger(__name__)
 
@@ -73,15 +74,38 @@ def _resolve_linter(filename:str) -> BaseLinter | None:
         if ext in linter.extensions:
             return linter
 
-def _extract_added_lines(patch:str) -> str:
-    """Extract only added lines from a unified diff patch."""
-    lines = []
-    for line in patch.splitlines():
-        if line.startswith("+++"):
+def _enrich_linter_output(raw_output: str, full_content: str, filename: str) -> str:
+    """
+    Replace temp file paths with real filename and attach the actual
+    offending line content to each violation so the LLM has concrete
+    context rather than just an error code and character count.
+    """
+    file_lines = full_content.splitlines()
+    enriched_lines = []
+
+    for raw_line in raw_output.splitlines():
+        # ruff/flake8 format: /tmp/xxx.py:LINE:COL: CODE message
+        match = re.match(r"^.+?:(\d+):(\d+):\s+(\S+)\s+(.+)$", raw_line)
+        if not match:
+            enriched_lines.append(raw_line)
             continue
-        if line.startswith("+"):
-            lines.append(line[1:])  # strip leading +
-    return "\n".join(lines)
+
+        line_num  = int(match.group(1))
+        col       = match.group(2)
+        code      = match.group(3)
+        message   = match.group(4)
+
+        # Look up the actual offending line from full file content
+        actual_line = ""
+        if 1 <= line_num <= len(file_lines):
+            actual_line = file_lines[line_num - 1].rstrip()
+
+        enriched_lines.append(
+            f"{filename}:{line_num}:{col}: {code} {message}\n"
+            f"  offending line: {actual_line}"
+        )
+
+    return "\n".join(enriched_lines)
 
 # Public API
 async def run_linters(files:list, owner:str, repo:str, head_sha:str) -> dict[str, str]:
@@ -134,7 +158,8 @@ async def run_linters(files:list, owner:str, repo:str, head_sha:str) -> dict[str
             stdout,stderr,_ = linter._run_cmd(cmd) 
             output = stdout or stderr
             if output.strip():
-                results[filename] = output.strip()
+                enriched = _enrich_linter_output(output.strip(), full_content, filename)
+                results[filename] = enriched
                 logger.info(f"{linter.name} output for {filename}:\n{output.strip()}")
         finally:
             os.unlink(tmp_path)

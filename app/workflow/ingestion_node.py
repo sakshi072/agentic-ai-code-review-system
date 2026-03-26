@@ -4,9 +4,11 @@ Ingestion node — runs once before all specialist agents.
 Responsibilities:
     1. Fetch changed files from GitHub via MCP
     2. Filter out files whose SHA hasn't changed since the last run
-    3. Render the diff into a single LLM-ready string
-    4. Write results to state so every downstream agent can read them
-       without re-fetching or re-filtering independently
+    3. Run linters once across all changed files (style-agent concern,
+       but centralised here to avoid N parallel linter fetches in the fan-out)
+    4. Split the changed files into line-budgeted chunks
+    5. Render a diff string for each chunk
+    6. Write chunk payloads + per-chunk linter slices to state
 """
 import logging
 from app.models.workflow_state import PRReviewState
@@ -16,20 +18,48 @@ from app.utils.agent_helper import (
     format_files_for_llm,
     updated_shas
 )
+from app.tools.linter import run_linters
 
 logger = logging.getLogger(__name__)
+MAX_LINES_PER_CHUNK = 600
+
+def chunk_files_by_lines(files: list[dict]) -> list[list[dict]]:
+    """
+    Split files into chunks such that no chunk exceeds MAX_LINES_PER_CHUNK
+    of total diff lines. Chunking happens at file boundaries — a single
+    file is never split across two chunks.
+    """
+    chunks: list[list[dict]] = []
+    current_chunk: list[dict] = []
+    current_lines = 0
+
+    for f in files:
+        patch = f.get("patch", "")
+        file_lines = len(patch.splitlines())
+
+        if current_chunk and current_lines + file_lines > MAX_LINES_PER_CHUNK:
+            chunks.append(current_chunk)
+            current_chunk = []
+            current_lines = 0
+        
+        current_chunk.append(f)
+        current_lines += file_lines
+
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
 
 async def ingestion_node(state: PRReviewState) -> dict:
     """
     LangGraph node — fetches and prepares PR file data for all agents.
  
     Reads:   owner, repo, pr_number, analyzed_file_shas (from state)
-    Writes:  files_to_analyze, diff_context, file_patches,
-             analyzed_file_shas (updated)
+    Writes:  chunks, linter_outputs, analyzed_file_shas (updated)
     """
     owner = state["owner"]
     repo = state["repo"]
     pr_number = state["pr_number"]
+    head_sha  = state["head_sha"]
 
     logger.info(f"Ingestion node starting — {owner}/{repo}/#{pr_number}")
 
@@ -41,9 +71,7 @@ async def ingestion_node(state: PRReviewState) -> dict:
         # Return empty sentinel values; agents will short-circuit on empty
         # files_to_analyze rather than each hitting the same failure
         return {
-            "files_to_analyze": [],
-            "diff_context":     "",
-            "file_patches":     {},
+            "chunks": [],
             "analyzed_file_shas": state.get("analyzed_file_shas") or {},
         }
     
@@ -59,38 +87,86 @@ async def ingestion_node(state: PRReviewState) -> dict:
     if not to_analyze:
         logger.info("Ingestion node — all files unchanged, nothing to analyze")
         return {
-            "files_to_analyze": [],
-            "diff_context":     "",
-            "file_patches":     {},
+            "chunks":             [],
+            "linter_outputs":     {},
             "analyzed_file_shas": updated_shas(prev_shas, files),
         }
     
-    # Render diff context once for all agents
-    diff_context = format_files_for_llm(to_analyze)
- 
-    if not diff_context.strip():
-        logger.info("Ingestion node — no reviewable content in diff, skipping")
-        return {
-            "files_to_analyze": [],
-            "diff_context":     "",
-            "file_patches":     {},
-            "analyzed_file_shas": updated_shas(prev_shas, files),
-        }
-
-    # Build raw patch map for line-number resolution
-    file_patches = {
-        f.get("filename"): f.get("patch", "")
-        for f in files
-    }
-
+    # Run linters once across all changed files
+    # it gets sliced per-chunk below so the router can forward only the
+    # relevant slice to each style agent Send.
+    try:
+        linter_output_flat = await run_linters(
+            to_analyze,
+            owner=owner,
+            repo=repo,
+            head_sha=head_sha
+        )
+        logger.info(
+            f"Ingestion node — linting complete, "
+            f"{len(linter_output_flat)} files with output"
+        )
+    except Exception as e:
+        logger.error(f"Ingestion node — linter failed, continuing without output: {e}")
+        linter_output_flat = {}
+    
+    # Split into line-budgeted chunks at file boundaries
+    file_chunks = chunk_files_by_lines(to_analyze)
     logger.info(
-        f"Ingestion node complete — diff_context {len(diff_context)} chars, "
-        f"{len(to_analyze)} files queued for analysis"
+        f"Ingestion node — {len(to_analyze)} files split into "
+        f"{len(file_chunks)} chunk(s) (budget: {MAX_LINES_PER_CHUNK} lines/chunk)"
     )
 
+    # Build chunk payloads and slice linter output per chunk
+    chunks: list[dict] = []
+    linter_outputs: dict[int, dict[str, str]] = {}
+
+    for i, chunk_files in enumerate(file_chunks):
+        diff_context = format_files_for_llm(chunk_files)
+
+        if not diff_context.strip():
+            logger.info(f"Ingestion node — chunk {i} has no reviewable content, skipping")
+            continue
+
+        file_patches = {
+            f.get("filename"): f.get("patch", "")
+            for f in chunk_files
+        }
+
+        # Slice linter output to only filename in this chunk
+        chunk_filenames = {f.get("filename") for f in chunk_files}
+        linter_outputs[i] = {
+            filename: output
+            for filename, output in linter_output_flat.items()
+            if filename in chunk_filenames
+        }
+
+        chunks.append({
+            "files": chunk_files,
+            "diff_context": diff_context,
+            "file_patches": file_patches
+        })
+
+        logger.info(
+            f"Ingestion node — chunk {i}: {len(chunk_files)} files, "
+            f"{len(diff_context)} diff chars, "
+            f"{len(linter_outputs[i])} files with linter output"
+        )
+
+    if not chunks:
+        logger.info("Ingestion node — no reviewable content across all chunks")
+        return {
+            "chunks":             [],
+            "linter_outputs":     {},
+            "analyzed_file_shas": updated_shas(prev_shas, files),
+        }
+    
+    logger.info(f"Ingestion node complete — {len(chunks)} chunk(s) ready for routing")
+
     return {
-        "files_to_analyze":   to_analyze,
-        "diff_context":       diff_context,
-        "file_patches":       file_patches,
+        "chunks":   chunks,
+        "linter_outputs": linter_outputs,
         "analyzed_file_shas": updated_shas(prev_shas, files),
+        "security_findings":   [],   # ← reset before fan-out
+        "style_findings":      [],   # ← reset before fan-out
     }
