@@ -84,7 +84,7 @@ def supervisor_pipeline():
     graph.add_node("ingestion", ingestion_node)
     graph.add_node("security_agent", security_agent_node)
     graph.add_node("style_agent", style_agent_node)
-
+    graph.add_node("dedup", dedup_node)
     graph.add_node("supervisor", supervisor_node)
 
     # Wire edges
@@ -97,8 +97,9 @@ def supervisor_pipeline():
     graph.add_conditional_edges("ingestion", chunk_router)
 
     # Both agents converge on supervisor
-    graph.add_edge("security_agent", "supervisor")
-    graph.add_edge("style_agent", "supervisor")
+    graph.add_edge("security_agent", "dedup")
+    graph.add_edge("style_agent", "dedup")
+    graph.add_edge("dedup", "supervisor")
 
     graph.add_edge("supervisor", END)
 
