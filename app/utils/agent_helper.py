@@ -215,21 +215,24 @@ def build_agent_prompt(
         f"Review this Pull Request for {focus}:\n\n"
         f"PR: {owner}/{repo}/#{pr_number}\n\n"
         "IMPORTANT: For every finding, you MUST populate fix_code with the "
-        "corrected code. Do not leave fix_code empty. Examples:\n"
+        "corrected code. Examples:\n"
         "- Unused import → fix_code: '' (empty line or deleted line)\n"
         "- Trailing whitespace → fix_code: the line with whitespace removed\n"
         "- Line too long → fix_code: the reformatted multi-line version\n\n"
     )
     
     if linter_output:
-        prompt += "## Static Linter Output\n"
+        prompt += "## Static Linter Output (reference only — do not quote verbatim)\n"
         prompt += (
             "These are verified violations. Each entry includes the exact "
             "offending line. For each violation you MUST:\n"
-            "1. Create one finding per violation — do not consolidate\n"
-            "2. Quote the offending line verbatim in the description\n"
-            "3. Include the line number from the violation in your finding\n"
-            "4. Copy that line into fix_code with the correction applied.\n\n"
+            "1. Extract the exact line number from the violation (e.g. 'file.py:27:1' → line=27)\n"
+            "2. Copy the offending line shown in the linter output into code_snippet\n"
+            "3. For blank line / whitespace violations where the offending line IS blank, "
+            "set code_snippet to a single space ' ' and still record the line number\n"
+            "4. Never omit line number — if you cannot find it, set it to 0\n\n"
+            "Write your own clean description for each finding. "
+            "Do NOT copy diagnostic codes, file paths, or arrow indicators.\n\n"
         )
         for filename, output in linter_output.items():
             prompt += f"### {filename}\n```\n{output}\n```\n\n"

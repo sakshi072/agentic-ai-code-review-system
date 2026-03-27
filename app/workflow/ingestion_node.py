@@ -21,7 +21,8 @@ from app.utils.agent_helper import (
 from app.tools.linter import run_linters
 
 logger = logging.getLogger(__name__)
-MAX_LINES_PER_CHUNK = 600
+MAX_LINES_PER_CHUNK = 50
+CHUNK_THRESHOLD_LINES = 50 
 
 def chunk_files_by_lines(files: list[dict]) -> list[list[dict]]:
     """
@@ -111,7 +112,20 @@ async def ingestion_node(state: PRReviewState) -> dict:
         linter_output_flat = {}
     
     # Split into line-budgeted chunks at file boundaries
-    file_chunks = chunk_files_by_lines(to_analyze)
+    total_diff_lines = sum(len(f.get("patch", "").splitlines()) for f in to_analyze)
+    if total_diff_lines <= CHUNK_THRESHOLD_LINES:
+        logger.info(
+            f"Ingestion node — {total_diff_lines} lines, below threshold, "
+            f"skipping chunking"
+        )
+        file_chunks = [to_analyze]  # single chunk, no splitting
+    else:
+        logger.info(
+            f"Ingestion node — {total_diff_lines} lines, chunking at "
+            f"{MAX_LINES_PER_CHUNK} lines/chunk"
+        )
+        file_chunks = chunk_files_by_lines(to_analyze)
+    
     logger.info(
         f"Ingestion node — {len(to_analyze)} files split into "
         f"{len(file_chunks)} chunk(s) (budget: {MAX_LINES_PER_CHUNK} lines/chunk)"

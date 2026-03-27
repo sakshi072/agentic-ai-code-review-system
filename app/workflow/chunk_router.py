@@ -14,7 +14,7 @@ def chunk_router(state:PRReviewState) -> list[Send]:
 
     if not chunks:
         logger.info("Chunk router - no chunks to dispatch, skipping agents")
-        return END
+        return [Send("supervisor", {**state})]
     
     sends: list[Send] = []
 
@@ -26,10 +26,19 @@ def chunk_router(state:PRReviewState) -> list[Send]:
     }
 
     for i, chunk in enumerate(chunks):
+        total_chars = len(chunk["diff_context"])
         logger.info(
             f"Chunk router - dispatching chunk {i} "
             f"({len(chunk['files'])} files) to all agents"
         )
+
+        # Hard guard: skip chunks that are too large for the LLM context window
+        if total_chars > 80_000:
+            logger.warning(
+                f"Chunk router — chunk {i} exceeds 80k chars, skipping "
+                f"to avoid context overflow"
+            )
+            continue
 
         # Security agent - no linter output needed
         sends.append(Send("security_agent", {

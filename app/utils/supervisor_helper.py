@@ -84,7 +84,6 @@ def format_review_body(security: list, style: list) -> str:
     total = len(security) + len(style)
     lines.append(f"*AI Review — {total} finding(s)*")
     result = _join_lines(lines)
-    logger.info(f"FULL BODY REPR:\n{repr(result)}")
     return result
 
 def build_inline_comments(findings: list) -> list[dict]:
