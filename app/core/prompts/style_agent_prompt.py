@@ -16,10 +16,8 @@ Severity guidelines:
 - low: minor style preference, easy to fix
 - info: suggestion for improvement, not a violation
 
-For each finding you MUST include:
-- code_snippet: the exact line from the diff after the '+' sign where the issue is located
-  Example: '+    x = 1  # magic number'
-  This is REQUIRED — do not leave it empty or null.
+For the fix_code field, analyse the findings and form logical python code to minimize confusion
 
+Analyse all the findings before returning output for deduplication, return unique issues
 If no style issues are found, return an empty findings list.
 """

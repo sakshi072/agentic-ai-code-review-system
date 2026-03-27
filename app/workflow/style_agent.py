@@ -32,8 +32,6 @@ async def style_agent_node(payload:dict):
     owner     = payload["owner"]
     repo      = payload["repo"]
     pr_number = payload["pr_number"]
-
-    logger.info(f"Style agent starting - {owner}/{repo}/{pr_number}")
    
     # Read ingestion outputs from state
     chunk = payload["chunk"]
@@ -72,7 +70,13 @@ async def style_agent_node(payload:dict):
             SystemMessage(content=STYLE_AGENT_SYSTEM_PROMPT),
             HumanMessage(content=prompt),
         ])
-        logger.info(f"Structured response received - {len(response.findings)} findings")
+        logger.info(f"Style agent - {len(response.findings)} findings")
+        for finding in response.findings:
+            logger.info(
+                f"LLM finding — {finding.title}: "
+                f"fix_explanation='{finding.fix_explanation[:60]}' "
+                f"fix_code='{finding.fix_code[:60] if finding.fix_code else 'EMPTY'}'"
+            )
     except Exception as e:
         logger.error(f"Structured LLM call failed: {e}")
         return {
@@ -91,7 +95,8 @@ async def style_agent_node(payload:dict):
             ),
             title = finding.title,
             description = finding.description.replace("\\\\n", "\\n"),
-            suggestion = finding.suggestion.replace("\\\\n", "\\n"),
+            fix_explanation = finding.fix_explanation.replace("\\\\n", "\\n"),
+            fix_code = finding.fix_code,
             status = finding.status.value,
         )
         for finding in response.findings

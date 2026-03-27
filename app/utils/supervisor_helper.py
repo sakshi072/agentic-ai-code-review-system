@@ -15,6 +15,40 @@ def decide_review_outcome(findings: list) -> ReviewDecision:
     #     return ReviewDecision.REQUEST_CHANGES
     return ReviewDecision.COMMENT
 
+def _clean_fix_code(code: str) -> str:
+    lines = []
+    for line in code.splitlines():
+        if line.startswith("+") or line.startswith("-"):
+            lines.append(line[1:])  # strip the +/- but keep the indentation after it
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+def _join_lines(lines: list[str]) -> str:
+    """Flatten list to string, expanding any embedded newlines within elements."""
+    flat = []
+    for item in lines:
+        flat.extend(item.split("\n"))
+    return "\n".join(flat)
+
+def format_finding(f: dict, show_line: bool = True) -> list[str]:
+    lines = []
+    lines.append(f"**`{f['file']}`** — {f['title']}")
+    lines.append(f"- **Severity:** `{f['severity'].upper()}`")
+    if show_line and f.get("line"):
+        lines.append(f"- **Line:** `{f['line']}`")
+    lines.append(f"- **Issue:** {f['description']}")
+    if f.get("fix_explanation"):
+        lines.append(f"- **Fix:** {f['fix_explanation']}")
+    lines.append("")
+    if f.get("fix_code", "").strip():
+        clean = _clean_fix_code(f["fix_code"]).strip()
+        lines.append("```python")
+        lines.extend(clean.splitlines())
+        lines.append("```")
+    lines.append("")
+    return lines
+
 def format_review_body(security: list, style: list) -> str:
     lines = []
     lines.append("## Security & Style Review")
@@ -28,44 +62,30 @@ def format_review_body(security: list, style: list) -> str:
             lines.append("### Security — Critical / High")
             lines.append("")
             for f in critical_high:
-                lines.append(f"**`{f['file']}`** - {f['title']}")
-                lines.append(f"- **Severity:** `{f["severity"].upper()}`")
-                if f.get("line"):
-                    lines.append(f"- **Line:** `{f['line']}`")
-                lines.append(f"- **Issue:** {f['description']}")
-                lines.append(f"- **Fix:** {f['suggestion']}")
-                lines.append("")
+                lines.extend(format_finding(f))
 
         if medium_low:
             lines.append("### Security — Medium / Low")
             lines.append("")
             for f in medium_low:
-                lines.append(f"**`{f['file']}`** - {f['title']}")
-                lines.append(f"- **Severity:** `{f["severity"].upper()}`")
-                if f.get("line"):
-                    lines.append(f"- **Line:** `{f['line']}`")
-                lines.append(f"- **Issue:** {f['description']}")
-                lines.append(f"- **Fix:** {f['suggestion']}")
-                lines.append("")
+                lines.extend(format_finding(f))
     
     if style:
         lines.append("### Style & Quality")
         lines.append("")
         for f in style:
-            lines.append(f"**`{f['file']}`** - {f['title']}")
-            lines.append(f"- **Severity:** `{f["severity"].upper()}`")
-            lines.append(f"- **Issue:** {f['description']}")
-            lines.append(f"- **Fix:** {f['suggestion']}")
-            lines.append("")
+            lines.extend(format_finding(f))
     
     if not security and not style:
         lines.append(" No issues found.")
         lines.append("")
 
     lines.append("---")
-    lines.append(f"* AI Security Agent {len(security + style)} finding(s)*")
-
-    return chr(10).join(lines)
+    total = len(security) + len(style)
+    lines.append(f"*AI Review — {total} finding(s)*")
+    result = _join_lines(lines)
+    logger.info(f"FULL BODY REPR:\n{repr(result)}")
+    return result
 
 def build_inline_comments(findings: list) -> list[dict]:
     """
@@ -86,18 +106,23 @@ def build_inline_comments(findings: list) -> list[dict]:
     sep = chr(10) + chr(10) + "---" + chr(10) + chr(10)
     comments = []
     for (path, line), group in grouped.items():
-        parts = [
-            f"**{f['title']}** (`{f['severity'].upper()}`)"
-            + chr(10) + chr(10)
-            + f"**Issue:** {f['description']}"
-            + chr(10) + chr(10)
-            + f"**Suggestion:** {f['suggestion']}"
-            for f in group
-        ]
+        parts = []
+        for f in group:
+            part = (
+                f"**{f['title']}** (`{f['severity'].upper()}`)\n\n"
+                f"**Issue:** {f['description']}"
+            )
+            if f.get("fix_explanation"):
+                part += f"\n\n**Fix:** {f['fix_explanation']}"
+            if f.get("fix_code", "").strip():
+                clean = _clean_fix_code(f["fix_code"]).strip()
+                part += "\n\n```python\n" + clean + "\n```"
+            parts.append(part)
+
         comments.append({
             "path": path,
             "line": line,
-            "body": sep.join(parts),
+            "body": "\n\n---\n\n".join(parts),
         })
         
     return comments

@@ -16,7 +16,24 @@ class AgentFindingSchema(BaseModel):
     )
     title:       str      = Field(description="Short one-line summary of the issue")
     description: str      = Field(description="Clear explanation of why this is a security risk")
-    suggestion:  str      = Field(description="Concrete fix recommendation with code example if possible")
+    fix_explanation: str = Field(
+        description=(
+            "One sentence explaining what to change. "
+            "Example: 'Remove trailing whitespace after the comma.'"
+        )
+    )
+    fix_code: str = Field(
+        description=(
+            "The corrected code only — no explanation, no prose, no diff markers. "
+            "Do NOT include leading '+' or '-' characters. "
+            "For simple single-line fixes (remove trailing whitespace, remove unused import): "
+            "write just the corrected line. "
+            "For structural fixes (line too long, restructure block): "
+            "include 2-3 lines of surrounding context so the location is clear. "
+            "Write plain Python exactly as it should appear in the file."
+        ),
+        default=""
+    )
     status: FindingStatus = Field(
         description=(
             "new — not in previous review. "
@@ -47,7 +64,24 @@ class StyleFindingSchema(BaseModel):
     )
     title:       str = Field(description="Short one-line summary of the style issue")
     description: str = Field(description="Clear explanation of why this is a style or quality problem")
-    suggestion:  str = Field(description="Concrete improvement with example if possible")
+    fix_explanation: str = Field(
+        description=(
+            "One sentence explaining what to change. "
+            "Example: 'Remove trailing whitespace after the comma.'"
+        )
+    )
+    fix_code: str = Field(
+        description=(
+            "The corrected code only — no explanation, no prose, no diff markers. "
+            "Do NOT include leading '+' or '-' characters. "
+            "For simple single-line fixes (remove trailing whitespace, remove unused import): "
+            "write just the corrected line. "
+            "For structural fixes (line too long, restructure block): "
+            "include 2-3 lines of surrounding context so the location is clear. "
+            "Write plain Python exactly as it should appear in the file."
+        ),
+        default=""
+    )
     status: FindingStatus = Field(
         description=(
             "new — not in previous review. "

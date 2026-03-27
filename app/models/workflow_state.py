@@ -36,13 +36,14 @@ class ReviewDecision(str, Enum):
 
 class AgentFinding(TypedDict):
     """A single finding from a specialist agent"""
-    severity: Severity  # enum — set by each agent
-    file: str           # filename where the issue was found
-    line: Optional[str] # line number or range if available
-    title: str          # short one-line summary
-    description: str    # details explanation
-    suggestion: str     # concrete fix recommendation
-    status: str         # status of the issue founded
+    severity: Severity    # enum — set by each agent
+    file: str             # filename where the issue was found
+    line: Optional[str]   # line number or range if available
+    title: str            # short one-line summary
+    description: str      # details explanation
+    fix_explanation: str       # concrete fix recommendation
+    fix_code: str  # suggestion type as code or prose
+    status: str           # status of the issue founded
 
 class PRReviewState(TypedDict):
     """

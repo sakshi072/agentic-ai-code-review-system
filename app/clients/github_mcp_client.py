@@ -74,7 +74,7 @@ class GithubMCPSession:
         
         tool = self.get_tool(tool_name)
         logger.info(f"Invoking: {tool_name}({kwargs})")
-        return await tool.ainvoke(kwargs)
+        return await tool.ainvoke(input=kwargs)
 
 # ---------------------------------------------------------------------------
 # Singleton — imported across the app

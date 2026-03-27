@@ -27,8 +27,6 @@ async def security_agent_node(payload:dict) -> dict:
     owner = payload["owner"]
     repo = payload["repo"]
     pr_number = payload["pr_number"]
-
-    logger.info(f"Security agent starting - {owner}/{repo}/{pr_number}")
     
     # Read ingestion outputs from state
     chunk = payload["chunk"]
@@ -65,6 +63,12 @@ async def security_agent_node(payload:dict) -> dict:
             HumanMessage(content=prompt),
         ])
         logger.info(f"Security agent — {len(response.findings)} findings, ")
+        for finding in response.findings:
+            logger.info(
+                f"LLM finding — {finding.title}: "
+                f"fix_explanation='{finding.fix_explanation[:60]}' "
+                f"fix_code='{finding.fix_code[:60] if finding.fix_code else 'EMPTY'}'"
+            )
     except Exception as e:
         logger.error(f"Security agent — structured LLM call failed: {e}")
         return {
@@ -83,7 +87,8 @@ async def security_agent_node(payload:dict) -> dict:
             ),
             title = finding.title,
             description = finding.description.replace("\\\\n", "\\n"),
-            suggestion = finding.suggestion.replace("\\\\n", "\\n"),
+            fix_explanation = finding.fix_explanation.replace("\\\\n", "\\n"),
+            fix_code = finding.fix_code,
             status = finding.status.value,
         )
         for finding in response.findings

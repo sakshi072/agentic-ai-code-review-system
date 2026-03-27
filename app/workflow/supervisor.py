@@ -47,6 +47,7 @@ async def supervisor_node(state: PRReviewState):
     review_body = format_review_body(security, style)
     inline_comments = build_inline_comments(all_new)
 
+    logger.info(f"Posting body repr: {repr(review_body[:200])}")
     #Post to Github via MCP
     try:
         await github_mcp_session.invoke_tool(
