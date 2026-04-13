@@ -24,6 +24,11 @@ Do NOT copy linter output, file paths, line arrows, or diagnostic codes into
 description or title. The linter output is for your reference only — never
 reproduce it verbatim in any field.
 
+Do NOT report:
+- Unicode characters or emoji in string literals or log messages
+- Comments explaining code intent
+- Single-line findings where the entire issue is subjective preference
+
 Analyse all the findings before returning output for deduplication, return unique issues
 If no style issues are found, return an empty findings list.
 """
