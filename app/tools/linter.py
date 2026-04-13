@@ -107,6 +107,27 @@ def _enrich_linter_output(raw_output: str, full_content: str, filename: str) -> 
 
     return "\n".join(enriched_lines)
 
+def filter_linter_to_diff(
+    linter_output: dict[str, str],
+    file_patches: dict[str, str]
+) -> dict[str, str]:
+    filtered = {}
+    for filename, output in linter_output.items():
+        patch = file_patches.get(filename, "")
+        # Just grab all line numbers mentioned in the patch header
+        changed_lines = set(re.findall(r"\+(\d+)", patch))
+        
+        kept = []
+        for line in output.splitlines():
+            # Keep the line if it mentions a changed line number, or has no line ref
+            m = re.search(r":(\d+):", line)
+            if not m or m.group(1) in changed_lines:
+                kept.append(line)
+        
+        if kept:
+            filtered[filename] = "\n".join(kept)
+    return filtered
+
 # Public API
 async def run_linters(files:list, owner:str, repo:str, head_sha:str) -> dict[str, str]:
     """
