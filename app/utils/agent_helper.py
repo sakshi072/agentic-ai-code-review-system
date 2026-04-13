@@ -13,6 +13,11 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+SKIP_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+    ".pdf", ".zip", ".tar", ".gz", ".lock",
+}
+
 def unescape_patches(files: list) -> list:
     for f in files:
         if isinstance(f.get("patch"), str):
@@ -26,7 +31,8 @@ def build_llm(model:str, temperature:float, base_url:str):
     return ChatOllama(
         model= model or settings.DEFAULT_AGENT_MODEL_ID,
         temperature=temperature or settings.DEFAULT_AGENT_TEMPERATURE,
-        base_url=base_url or settings.DEFAULT_AGENT_BASE_URL
+        base_url=base_url or settings.DEFAULT_AGENT_BASE_URL,
+        timeout=30,
     )
 
 def parse_mcp_response(raw_changes:Any) -> list:
@@ -48,116 +54,117 @@ def parse_mcp_response(raw_changes:Any) -> list:
     
     return unescape_patches(parsed)
 
-def format_files_for_llm(files:list) -> str:
+def format_files_for_llm(files: list) -> str:
     """
     Renders changed files into a structured string for LLM consumption.
-    Skips binary files, caps individual file patches at 200 lines.
+ 
+    Each added line (+) is annotated with its actual file line number:
+        +[line 91] SECRET_KEY = "..."
+    This lets the LLM report exact line numbers without parsing hunk headers.
+ 
+    Skips binary files and removed files.
+    Caps individual file patches at 200 lines.
     """
     sections = []
-
-    SKIP_EXTENSIONS = {
-        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
-        ".pdf", ".zip", ".tar", ".gz", ".lock",
-    }
-
+ 
     for f in files:
-        filename = f.get("filename", "")
-        status = f.get("status", "modified")
-        patch = f.get("patch", "")
+        filename  = f.get("filename", "")
+        status    = f.get("status", "modified")
+        patch     = f.get("patch", "")
         additions = f.get("additions", 0)
         deletions = f.get("deletions", 0)
-
-        # ── Add this temporarily to debug ────────────────────────────────
-        logger.info(f"  📄 {filename} — patch length: {len(patch)}, lines: {len(patch.splitlines())}")
-        # ─────────────────────────────────────────────────────────────────
-
+ 
+        logger.info(
+            f"  📄 {filename} — patch length: {len(patch)}, "
+            f"lines: {len(patch.splitlines())}"
+        )
+ 
         # Skip binary / non-reviewable files
-        ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if ext in SKIP_EXTENSIONS:
+        ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+        if ext in SKIP_EXTENSIONS or status == "removed" or not patch:
             continue
-        
-        if status == "removed":
-            continue
-
-        if not patch:
-            continue
-
-        # Cap patch size - large patches lose LLM focus
-        patch_lines = patch.splitlines()
+ 
+        # Annotate added lines with their actual file line numbers
+        annotated: list[str] = []
+        current_line = 0
+ 
+        for line in patch.splitlines():
+            if line.startswith("@@"):
+                # Hunk header — extract new-file start line
+                m = re.search(r"\+(\d+)", line)
+                if m:
+                    current_line = int(m.group(1))
+                annotated.append(line)
+            elif line.startswith("+"):
+                # Added line — inject line number so LLM can read it directly
+                annotated.append(f"+[line {current_line}] {line[1:]}")
+                current_line += 1
+            elif line.startswith("-"):
+                # Removed line — no new-file line number
+                annotated.append(line)
+            else:
+                # Context line — advances new-file line counter
+                annotated.append(line)
+                current_line += 1
+ 
+        # Cap patch size — large patches lose LLM focus
         truncated = False
-        if len(patch_lines) > 200:
-            patch_lines = patch_lines[:200]
+        if len(annotated) > 200:
+            annotated = annotated[:200]
             truncated = True
-
+ 
         section = (
             f"### File: `{filename}` [{status}] +{additions}/-{deletions}\n"
             f"```diff\n"
-            f"{chr(10).join(patch_lines)}\n"
+            f"{chr(10).join(annotated)}\n"
             f"{'[... truncated for length ...]' if truncated else ''}"
             f"```\n"
         )
         sections.append(section)
+ 
     return "\n".join(sections)
 
-def format_prev_issues(files:list, issues_identified: list[AgentFinding],) -> str:
-    """
-    Render issues from the previous run into a structured string for LLM context.
-    The LLM uses this + the current diff to determine what is resolved,
-    what persists, and what is new.
-    """
-    if not issues_identified:
-        return ""
+def find_line_in_diff(patch: str, snippet: str) -> int | None:
+    if not snippet:
+        return None
 
-    filenames_in_run = {f.get("filename", "") for f in files}
+    snippet = snippet.strip()
 
-    relevant_issues = [
-        issue for issue in issues_identified
-        if issue["file"] in filenames_in_run
-    ]
+    # Strategy 1: LLM copied [line N] annotation verbatim
+    m = re.search(r"\[line (\d+)\]", snippet)
+    if m:
+        return int(m.group(1))
 
-    if not relevant_issues:
-        return ""
-    
-    # Group by file for readable output
-    issues_by_file: dict[str, list] = {}
-    for issue in relevant_issues:
-        issues_by_file.setdefault(issue["file"], []).append(issue)
+    # ADDED Strategy: The LLM was lazy and just returned the line number like "+12" or "12"
+    m_lazy = re.fullmatch(r"\+?(\d+)", snippet)
+    if m_lazy:
+        return int(m_lazy.group(1))
 
-    sections = []
-    for filename, file_issues in issues_by_file.items():
-        section_lines = [f"### Previously posted issues in `{filename}`"]
-        for i, issue in enumerate(file_issues, 1):
-            line_ref = f" (line {issue['line']})" if issue.get("line") else ""
-            section_lines.append(
-                f"{i}. **{issue['title']}**{line_ref}"
-                f"\n. {issue['description']}"
-            )
-        sections.append(chr(10).join(section_lines))
-    
-    if not sections:
-        return ""
-    
-    header = (
-        "## Context From Previous Review\n"
-        "Issues already posted. For each one: if still present in the current diff "
-        "→ set status=persists and omit. If no longer present → mark status=resolved. "
-        "Only report genuinely new issues and set status=new\n\n"
+    # Strategy 2: match first non-empty line of snippet against patch
+    first_line = next(
+        (
+            re.sub(r"\[line \d+\]\s*", "", l).lstrip("+").strip()
+            for l in snippet.splitlines()
+            if l.strip() and not l.strip().startswith("...")
+        ),
+        None,
     )
+    
+    if not first_line:
+        return None
 
-    return header + "\n\n".join(sections)
-
-def find_line_in_diff(patch:str, snippet:str) -> int | None:
-    clean_snippet = snippet.lstrip("+").strip()
     current_line = 0
     for line in patch.splitlines():
         if line.startswith("@@"):
-            match = re.search(r'\+(\d+)', line)
+            match = re.search(r"\+(\d+)", line)
             if match:
                 current_line = int(match.group(1)) - 1
         elif not line.startswith("-"):
             current_line += 1
-            if clean_snippet and clean_snippet in line:
+            clean_patch_line = line.lstrip("+").strip()
+            if first_line and first_line in clean_patch_line:
                 return current_line
+
     return None
 
 async def fetch_file_contents(owner, repo, pr_number):
@@ -202,54 +209,47 @@ def updated_shas(prev_shas:dict, files:list) -> dict:
     }
 
 def build_agent_prompt(
-    owner:str,
-    repo:str,
-    pr_number:str,
-    diff_context:str,
-    files:list,
-    issues_identified:list[dict],
-    focus:str,
-    linter_output:Optional[dict[str,str]] = {}
+    owner: str,
+    repo: str,
+    pr_number: str,
+    diff_context: str,
+    focus: str,
+    linter_output: Optional[dict[str, str]] = {},
 ) -> str:
+
     prompt = (
-        f"Review this Pull Request for {focus}:\n\n"
-        f"PR: {owner}/{repo}/#{pr_number}\n\n"
-        "IMPORTANT: For every finding, you MUST populate fix_code with the "
-        "corrected code. Examples:\n"
-        "- Unused import → fix_code: '' (empty line or deleted line)\n"
-        "- Trailing whitespace → fix_code: the line with whitespace removed\n"
-        "- Line too long → fix_code: the reformatted multi-line version\n\n"
+        f"Review PR #{pr_number} ({owner}/{repo}) for {focus}.\n\n"
+        "## Rules — read before reviewing\n"
+        "1. Only report issues in lines prefixed with '+' in the diff.\n"
+        "2. Every finding MUST have a line number.\n"
+        "Added lines in the diff are annotated as '+[line N]' — use N directly.\n"
+        "If a line has no annotation, skip the finding.\n\n"
     )
-    
+
+    # ── Diff ──────────────────────────────────────────────────────────────────
+    prompt += f"## Diff\n{diff_context}\n\n"
+
+    # ── Linter output (mechanical violations) ────────────────────────────────
     if linter_output:
-        prompt += "## Static Linter Output (reference only — do not quote verbatim)\n"
         prompt += (
-            "These are verified violations. Each entry includes the exact "
-            "offending line. For each violation you MUST:\n"
-            "1. Extract the exact line number from the violation (e.g. 'file.py:27:1' → line=27)\n"
-            "2. Copy the offending line shown in the linter output into code_snippet\n"
-            "3. For blank line / whitespace violations where the offending line IS blank, "
-            "set code_snippet to a single space ' ' and still record the line number\n"
-            "4. Never omit line number — if you cannot find it, set it to 0\n\n"
-            "Write your own clean description for each finding. "
-            "Do NOT copy diagnostic codes, file paths, or arrow indicators.\n\n"
+            "## Additional findings\n"
+            "Report only issues you can point to a specific line in the diff above.\n"
+            "For each finding you MUST have:\n"
+            "- A specific file and line number\n"
+            "- The exact line from the diff in code_snippet\n"
+            "Do NOT report general observations like 'this file has complexity issues'. "
+            "If you cannot point to a specific line, do not report the finding.\n\n"
+            "Look for:\n"
+            "- Unclear variable or function name on a specific added line\n"
+            "- Missing docstring on a specific added function or class\n"
+            "- Hardcoded value on a specific added line that should be a constant\n"
+            "- Bare except on a specific added line\n\n"
+            "Do NOT report whitespace, line length, or unused imports — "
+            "those are covered by the linter above.\n"
         )
         for filename, output in linter_output.items():
             prompt += f"### {filename}\n```\n{output}\n```\n\n"
-    prompt += f"## Current Diff\n{diff_context}"
-
-    prev_context = format_prev_issues(files, issues_identified)
     
-    if prev_context:
-        prompt += prev_context
-    else:
-        prompt += (
-            "\n\n## Previous Review\n"
-            "This is the first review of this PR — there are no previously posted issues. "
-            "Mark ALL findings as status=new. "
-            "Do NOT mark anything as resolved or persists."
-        )
-
     return prompt
 
 async def fetch_full_file(owner: str, repo: str, filepath: str, ref: str) -> str:
@@ -276,4 +276,3 @@ async def fetch_full_file(owner: str, repo: str, filepath: str, ref: str) -> str
     decoded = base64.b64decode(content.replace("\n", "")).decode("utf-8")
     logger.info(f"fetch_full_file: {filepath} at {ref[:7]} — {len(decoded)} chars, {decoded.count(chr(10))} lines")
     return decoded
-

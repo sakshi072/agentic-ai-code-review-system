@@ -1,6 +1,5 @@
 from app.models.agent_finding_model import SecurityResponseSchema
-from app.models.workflow_state import PRReviewState, AgentFinding
-from app.core.configs.github_server_config import MCPTool
+from app.models.workflow_state import AgentFinding
 from app.utils.agent_helper import (
     build_llm, 
     find_line_in_diff, 
@@ -46,16 +45,13 @@ async def security_agent_node(payload:dict) -> dict:
         repo=repo,
         pr_number=pr_number,
         diff_context=diff_context,
-        files = to_analyze,
-        issues_identified= issues_identified,
         focus = "security vulnerabilities",
     )
 
     # Call structured LLM
-    structured_llm = build_llm("qwen3:8b", 0, "http://localhost:11434").with_structured_output(
+    structured_llm = build_llm("qwen3:8b", 0, "http://127.0.0.1:11434").with_structured_output(
         SecurityResponseSchema
     )
-    # structured_llm = build_llm("deepseek-coder-v2", 0, "http://localhost:11434")
 
     try:
         response: SecurityResponseSchema = await structured_llm.ainvoke([
@@ -72,8 +68,7 @@ async def security_agent_node(payload:dict) -> dict:
     except Exception as e:
         logger.error(f"Security agent — structured LLM call failed: {e}")
         return {
-            "security_findings": [],
-            "security_issues_identified": issues_identified,
+            "security_findings": []
         }
 
     # Map pydantic -> AgentFinding TypedDict
@@ -89,23 +84,19 @@ async def security_agent_node(payload:dict) -> dict:
             description = finding.description.replace("\\\\n", "\\n"),
             fix_explanation = finding.fix_explanation.replace("\\\\n", "\\n"),
             fix_code = finding.fix_code,
-            status = finding.status.value,
         )
         for finding in response.findings
     ]
 
     logger.info(f" Security agent complete — {len(findings)} findings")
 
-    # Split by status
-    to_post = [f for f in findings if f["status"] == "new"]
-    resolved = [f for f in findings if f["status"] == "resolved"]
-
-    for r in resolved:
-        logger.info(f"  ✅ Resolved: {r['file']} — {r['title']}")
-
-    for f in to_post:
-        logger.info(f"  [{f['severity'].upper()}] {f['file']}: {f['title']}")
+    for finding in response.findings:
+        logger.info(
+            f"  snippet='{finding.code_snippet[:50] if finding.code_snippet else 'EMPTY'}' "
+            f"→ line={find_line_in_diff(file_patches.get(finding.file, ''), finding.code_snippet)}"
+        )
 
     return {
-        "security_findings": to_post,
+        "security_findings": findings,
+        "agents_completed": 1, 
     }

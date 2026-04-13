@@ -14,62 +14,215 @@ from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
 from app.workflow.style_agent import style_agent_node
 from app.workflow.ingestion_node import ingestion_node
-from app.workflow.dedup_node import dedup_node
 from langgraph.checkpoint.memory import InMemorySaver
 from app.utils.supervisor_helper import decide_review_outcome, format_review_body, build_inline_comments
-from app.workflow.chunk_router import chunk_router
+from app.workflow.router import chunk_router
+from app.tools.github_apis import _parse_review_ids, _tag_inline_comments, update_review
+from app.models.agent_finding_model import JudgeOutput, CuratedFinding
+from langchain_ollama import ChatOllama
+from langchain_core.messages import SystemMessage, HumanMessage
+from app.core.prompts.supervisor_judge_prompt import JUDGE_SYSTEM_PROMPT, JUDGE_USER_TEMPLATE
+import json
+
 logger = logging.getLogger(__name__)
 checkpointer = InMemorySaver()
+
+_judge_llm = ChatOllama(
+    model="mistral-nemo",
+    base_url="http://127.0.0.1:11434",
+    temperature=0,
+).with_structured_output(JudgeOutput)
+
+async def _run_judge(
+    security_findings: list[dict],
+    style_findings: list[dict],
+    carried_over: list[dict],
+    diff_context: str,
+) -> list[CuratedFinding]:
+    """
+    Run the LLM judge over all findings — current run + carried-over.
+    Uses structured output — no JSON parsing or validation needed.
+    Falls back to empty list on any failure so the pipeline never crashes.
+    """
+    prompt = JUDGE_USER_TEMPLATE.format(
+        total=len(security_findings) + len(style_findings),
+        n_security=len(security_findings),
+        n_style=len(style_findings),
+        n_carried=len(carried_over),
+        security_json=json.dumps(security_findings, indent=2, default=str),
+        style_json=json.dumps(style_findings, indent=2, default=str),
+        carried_json=json.dumps(carried_over, indent=2, default=str),
+        diff_context=diff_context[:6000],
+    )
+
+    try:
+        result: JudgeOutput = await _judge_llm.ainvoke([
+            SystemMessage(content=JUDGE_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ])
+        logger.info(
+            f"Judge — input: {len(security_findings)} security + "
+            f"{len(style_findings)} style + {len(carried_over)} carried-over "
+            f"→ {len(result.findings)} curated findings"
+        )
+        return result.findings
+
+    except Exception as e:
+        logger.error(f"Judge LLM call failed: {e}")
+        return []
 
 async def supervisor_node(state: PRReviewState):
     """
     Runs after all specialist agents complete.
     Synthesizes findings → decides review outcome → posts to GitHub.
     """
-    security = state["security_findings"] or []
-    style = state["style_findings"] or []
-
-    all_new = security + style
+    raw_security         = state.get("security_findings") or []
+    raw_style            = state.get("style_findings") or []
+    chunks               = state.get("chunks") or []
+    n_expected           = len(chunks) * 2
+    n_completed          = state.get("agents_completed", 0)
+    prior_review_id      = state.get("prior_review_id")
+    prior_review_node_id = state.get("prior_review_node_id")
+    pr_files             = state.get("pr_files") or []
 
     logger.info(
-        f"Supervisor — {len(all_new)} new findings")
+        f"Supervisor — {n_completed}/{n_expected} agents done | "
+        f"{len(raw_security)} security, {len(raw_style)} style findings"
+    )
 
-    # Skip posting if no findings
-    if not all_new:
-        logger.info("No findings — skipping review post")
+    logger.info(f"raw_security[0]: {json.dumps(raw_security[0], default=str)}")
+ 
+    # ── Guard: no chunks dispatched (all files unchanged) ────────────────────
+    if n_expected == 0:
+        logger.info("Supervisor — no chunks dispatched, nothing to post")
         return {
-            "final_review":    None,
-            "review_decision": None,
+            "final_review":          None,
+            "review_decision":       None,
+            "prior_review_id":       prior_review_id,
+            "prior_review_node_id":  prior_review_node_id,
         }
 
-    # Decide review outcome based on severity
-    review_decsion = decide_review_outcome(all_new)
-    review_body = format_review_body(security, style)
-    inline_comments = build_inline_comments(all_new)
+    if n_completed < n_expected:
+        logger.info(
+            f"Supervisor — waiting "
+            f"({n_expected - n_completed} agent(s) still running)"
+        )
+        return {}
+    
+    logger.info(
+        f"Supervisor — raw: {len(raw_security)} security, "
+        f"{len(raw_style)} style"
+    )
 
-    logger.info(f"Posting body repr: {repr(review_body[:200])}")
+    # ── Compute carried-over issues from unchanged files
+    prev_all = state.get("open_issues_identified") or []
+    all_pr_filenames = {f.get("filename") for f in pr_files}
+    analyzed_files   = {
+        f.get("filename")
+        for chunk in chunks
+        for f in chunk["files"]
+    }
+
+    carried_over = [
+        issue for issue in prev_all
+        if issue["file"] not in analyzed_files          # not re-analyzed this run
+        and issue["file"] in all_pr_filenames           # still present in the PR
+    ]
+ 
+    logger.info(
+        f"Supervisor — sending to judge: "
+        f"{len(raw_security)} security + {len(raw_style)} style + "
+        f"{len(carried_over)} carried-over"
+    )
+    
+    # ── Aggregate diff context across all chunks
+    diff_context = "\n\n".join(
+        chunk.get("diff_context", "") for chunk in chunks
+    )
+
+    logger.info(f"diff context with line number : {diff_context}")
+
+    logger.info(
+        f"Agent findings with line numbers: "
+        f"{sum(1 for f in raw_security + raw_style if f.get('line'))}/"
+        f"{len(raw_security) + len(raw_style)}"
+    )
+
+    # ── LLM judge: curate all findings into one unified list
+    curated = await _run_judge(raw_security, raw_style, carried_over, diff_context)
+
+    for f in curated:
+        logger.info(f"logging curated findings: {f}")
+ 
+    logger.info(
+        f"Supervisor — judge output: {len(curated)} finding(s) | "
+        f"severities: { {f.severity for f in curated} }"
+    )
+
+    # open_issues is the judge's output — single flat list for next run
+    open_issues = [f.model_dump() for f in curated]
+ 
+    if not curated:
+        logger.info("Supervisor — no findings after judge, skipping post")
+        return {
+            "final_review":          None,
+            "review_decision":       None,
+            "prior_review_id":       prior_review_id,
+            "prior_review_node_id":  prior_review_node_id,
+            "open_issues_identified": open_issues,
+        }
+
+    owner = state["owner"]
+    repo = state["repo"]
+    pr_number = state["pr_number"]
+
+    # Decide review outcome based on severity
+    review_decision = decide_review_outcome(curated)
+    review_body     = format_review_body(curated)
+    inline_comments = _tag_inline_comments(build_inline_comments(curated))
+    
+    if prior_review_id is not None:
+        logger.info(f"Supervisor — updating prior review {prior_review_id}")
+        await update_review(owner, repo, pr_number, prior_review_id, review_body)
+        logger.info(
+            f"Review updated — {review_decision.value} | "
+            f"{len(curated)} finding(s) | {len(inline_comments)} inline comment(s)"
+        )
+        return {
+            "final_review":           review_body,
+            "review_decision":        review_decision,
+            "prior_review_id":        prior_review_id,
+            "prior_review_node_id":   prior_review_node_id,
+            "open_issues_identified": open_issues,
+        }
+
     #Post to Github via MCP
     try:
-        await github_mcp_session.invoke_tool(
-        MCPTool.CREATE_PULL_REQUEST_REVIEW,
-        owner=state["owner"],
-        repo=state["repo"],
-        pull_number=state["pr_number"],
-        body=review_body,
-        event=review_decsion.value,
-        comments=inline_comments, 
+        response = await github_mcp_session.invoke_tool(
+            MCPTool.CREATE_PULL_REQUEST_REVIEW,
+            owner=owner,
+            repo=repo,
+            pull_number=pr_number,
+            body=review_body,
+            event=review_decision.value,
+            # comments=inline_comments,
         )
+        new_review_id, new_review_node_id = _parse_review_ids(response)
         logger.info(
-            f"✅ Review posted — {review_decsion.value}, "
-            f"{len(all_new)} new, {len(inline_comments)} inline comments"
+            f"Review posted — {review_decision.value} | "
+            f"id={new_review_id} | node={new_review_node_id} | "
+            f"{len(curated)} finding(s) | {len(inline_comments)} inline comment(s)"
         )
     except Exception as e:
         logger.error(f"Failed to post review: {e}")
         raise
-    
+ 
     return {
-        "final_review": review_body,
-        "review_decision": review_decsion,
+        "final_review":           review_body,
+        "review_decision":        review_decision,
+        "prior_review_id":        new_review_id,
+        "prior_review_node_id":   new_review_node_id,
+        "open_issues_identified": open_issues,
     }
 
 def supervisor_pipeline():
@@ -85,7 +238,6 @@ def supervisor_pipeline():
     graph.add_node("ingestion", ingestion_node)
     graph.add_node("security_agent", security_agent_node)
     graph.add_node("style_agent", style_agent_node)
-    graph.add_node("dedup", dedup_node)
     graph.add_node("supervisor", supervisor_node)
 
     # Wire edges
@@ -98,10 +250,8 @@ def supervisor_pipeline():
     graph.add_conditional_edges("ingestion", chunk_router)
 
     # Both agents converge on supervisor
-    graph.add_edge("security_agent", "dedup")
-    graph.add_edge("style_agent", "dedup")
-    graph.add_edge("dedup", "supervisor")
-
+    graph.add_edge("security_agent", "supervisor")
+    graph.add_edge("style_agent", "supervisor")
     graph.add_edge("supervisor", END)
 
     compiled = graph.compile(checkpointer=checkpointer)

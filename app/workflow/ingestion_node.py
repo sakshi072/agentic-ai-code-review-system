@@ -18,11 +18,11 @@ from app.utils.agent_helper import (
     format_files_for_llm,
     updated_shas
 )
-from app.tools.linter import run_linters
+from app.tools.linter import run_linters, filter_linter_to_diff
 
 logger = logging.getLogger(__name__)
-MAX_LINES_PER_CHUNK = 50
-CHUNK_THRESHOLD_LINES = 50 
+MAX_LINES_PER_CHUNK = 500
+CHUNK_THRESHOLD_LINES = 500 
 
 def chunk_files_by_lines(files: list[dict]) -> list[list[dict]]:
     """
@@ -73,7 +73,7 @@ async def ingestion_node(state: PRReviewState) -> dict:
         # files_to_analyze rather than each hitting the same failure
         return {
             "chunks": [],
-            "analyzed_file_shas": state.get("analyzed_file_shas") or {},
+            "analyzed_file_shas": state.get("analyzed_file_shas") or {}
         }
     
     # Skip files whose SHA hasn't changed since the last run
@@ -91,6 +91,10 @@ async def ingestion_node(state: PRReviewState) -> dict:
             "chunks":             [],
             "linter_outputs":     {},
             "analyzed_file_shas": updated_shas(prev_shas, files),
+            "security_findings":   [],   # ← reset before fan-out
+            "style_findings":      [],   # ← reset before fan-out
+            "pr_files": files,
+            "agents_completed":   0
         }
     
     # Run linters once across all changed files
@@ -149,11 +153,14 @@ async def ingestion_node(state: PRReviewState) -> dict:
 
         # Slice linter output to only filename in this chunk
         chunk_filenames = {f.get("filename") for f in chunk_files}
-        linter_outputs[i] = {
-            filename: output
-            for filename, output in linter_output_flat.items()
-            if filename in chunk_filenames
-        }
+        linter_outputs[i] = filter_linter_to_diff(
+            {
+                filename: output
+                for filename, output in linter_output_flat.items()
+                if filename in chunk_filenames
+            },
+            file_patches
+        )
 
         chunks.append({
             "files": chunk_files,
@@ -173,6 +180,8 @@ async def ingestion_node(state: PRReviewState) -> dict:
             "chunks":             [],
             "linter_outputs":     {},
             "analyzed_file_shas": updated_shas(prev_shas, files),
+            "pr_files": files,
+            "agents_completed":   0
         }
     
     logger.info(f"Ingestion node complete — {len(chunks)} chunk(s) ready for routing")
@@ -181,6 +190,6 @@ async def ingestion_node(state: PRReviewState) -> dict:
         "chunks":   chunks,
         "linter_outputs": linter_outputs,
         "analyzed_file_shas": updated_shas(prev_shas, files),
-        "security_findings":   [],   # ← reset before fan-out
-        "style_findings":      [],   # ← reset before fan-out
+        "pr_files": files,
+        "agents_completed":   0
     }
