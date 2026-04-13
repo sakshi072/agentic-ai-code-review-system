@@ -5,7 +5,6 @@ class Settings(BaseSettings):
     # Github webhook secret
     GITHUB_WEBHOOK_SECRET: str = ""
     GITHUB_TOKEN:str=""
-    model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
     # Default Agent LLM 
     DEFAULT_AGENT_MODEL_ID:str = "deepseek-coder-v2"
@@ -16,5 +15,7 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY:str
     LANGFUSE_PUBLIC_KEY:str
     LANGFUSE_BASE_URL:str
+
+    model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
 settings = Settings()
