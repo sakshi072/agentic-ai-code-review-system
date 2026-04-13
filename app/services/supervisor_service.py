@@ -32,6 +32,8 @@ def start_supervisor(pr_data:PRData):
         "pr_number": pr_data.number,
         "head_sha": pr_data.head_sha,
         "messages": [HumanMessage(content=f"Review PR #{pr_data.number} commit {pr_data.head_sha[:7]}")],
+        "security_findings":   [],   # ← reset before fan-out
+        "style_findings":      [],   # ← reset before fan-out
     }
 
     # Fire and forget — webhook must return quickly (GitHub 10s timeout)
@@ -50,7 +52,7 @@ async def _run_pipeline(pipeline, state:dict, pr_number:int, owner:str, repo:str
     """Runs the agent pipeline in the background"""
     config = {
         "configurable":{
-            "thread_id": f"pr-{owner}-{repo}-{pr_number}"
+            "thread_id": f"pr-{owner}-{repo}-#{pr_number}"
         },
         "callbacks":[langfuse_handler]
     }

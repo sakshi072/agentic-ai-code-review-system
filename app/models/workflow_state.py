@@ -43,7 +43,6 @@ class AgentFinding(TypedDict):
     description: str      # details explanation
     fix_explanation: str       # concrete fix recommendation
     fix_code: str  # suggestion type as code or prose
-    status: str           # status of the issue founded
 
 class PRReviewState(TypedDict):
     """
@@ -61,6 +60,11 @@ class PRReviewState(TypedDict):
     repo: str
     pr_number: int
     head_sha: str
+    pr_files: list[dict]
+    
+    # Github Actions related fields
+    prior_review_id: int | None
+    prior_review_node_id:str | None
 
     # Conversation messages for LangGraph ReAct agents
     messages: Annotated[list[BaseMessage], add_messages]
@@ -73,7 +77,8 @@ class PRReviewState(TypedDict):
     #     "file_patches": dict[str,str] # raw patch per filename for line resolution
     #   }
     chunks: Optional[list[dict]]
-    
+    agents_completed: Annotated[int, add]
+
     # Per-chunk linter results — keyed by chunk index (int).
     # Stored separately from chunks so the router can forward it exclusively
     # to style_agent Sends; security_agent never receives it.
@@ -87,8 +92,7 @@ class PRReviewState(TypedDict):
     analyzed_file_shas:  Annotated[dict[str, str], merge_dicts]
     
     # Previously identified open issues — compared against on re-runs
-    security_issues_identified: Optional[list[AgentFinding]]                       # List of Issue object combing every file's all issues in Security agent
-    style_issues_identified: Optional[list[AgentFinding]]                          # List of Issue object combing every file's all issues in Style agent
+    open_issues_identified: Optional[list[dict]]
 
     # Supervisor output
     final_review: Optional[str]                                                     # markdown summary posted to GitHub
