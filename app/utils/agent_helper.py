@@ -29,6 +29,7 @@ def unescape_patches(files: list) -> list:
     return files
 
 def build_llm(model:str, temperature:float, base_url:str):
+    # Using chatollama for development purpose
     return ChatOllama(
         model= model or settings.DEFAULT_AGENT_MODEL_ID,
         temperature=temperature or settings.DEFAULT_AGENT_TEMPERATURE,
