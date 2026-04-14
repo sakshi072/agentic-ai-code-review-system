@@ -41,7 +41,6 @@ async def style_agent_node(payload:dict):
  
     # Linter output pre-computed by ingestion node — scoped to this chunk's files
     linter_output = payload.get("linter_output") or {}
-    issues_identified = payload.get("style_issues_identified") or []
     
     logger.info(
         f"Style agent starting — {owner}/{repo}/#{pr_number} "

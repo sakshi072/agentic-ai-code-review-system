@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY:str
     LANGFUSE_BASE_URL:str
 
+    OPEN_API_KEY:str
+
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
 settings = Settings()

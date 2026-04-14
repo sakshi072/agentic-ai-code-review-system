@@ -33,8 +33,6 @@ async def security_agent_node(payload:dict) -> dict:
     diff_context = chunk["diff_context"]
     file_patches = chunk["file_patches"]
     
-    issues_identified = chunk.get("security_issues_identified") or []
-
     logger.info(
         f"Security agent starting — {owner}/{repo}/#{pr_number} "
         f"({len(to_analyze)} files in chunk)"

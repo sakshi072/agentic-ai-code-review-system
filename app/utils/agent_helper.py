@@ -1,4 +1,5 @@
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from app.core.configs.settings import settings
 from app.clients.github_mcp_client import github_mcp_session
 from app.core.configs.github_server_config import MCPTool
@@ -28,11 +29,17 @@ def unescape_patches(files: list) -> list:
     return files
 
 def build_llm(model:str, temperature:float, base_url:str):
-    return ChatOllama(
-        model= model or settings.DEFAULT_AGENT_MODEL_ID,
-        temperature=temperature or settings.DEFAULT_AGENT_TEMPERATURE,
-        base_url=base_url or settings.DEFAULT_AGENT_BASE_URL,
+    # return ChatOllama(
+    #     model= model or settings.DEFAULT_AGENT_MODEL_ID,
+    #     temperature=temperature or settings.DEFAULT_AGENT_TEMPERATURE,
+    #     base_url=base_url or settings.DEFAULT_AGENT_BASE_URL,
+    #     timeout=30,
+    # )
+    return ChatOpenAI(
+        model="gpt-4.1-nano",
+        temperature=0,
         timeout=30,
+        api_key=settings.OPEN_API_KEY
     )
 
 def parse_mcp_response(raw_changes:Any) -> list:
