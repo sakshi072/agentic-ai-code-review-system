@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 def chunk_router(state:PRReviewState) -> list[Send]:
     """
-    Conditional edge: ingestion → [security_agent, style_agent] × N chunks.
+    Conditional edge: ingestion → [security_agent, style_agent, logic agent] × N chunks.
     """
     chunks = state.get("chunks") or []
     linter_outputs = state.get("linter_outputs") or {}
@@ -44,7 +44,6 @@ def chunk_router(state:PRReviewState) -> list[Send]:
         sends.append(Send("security_agent", {
             **pr_context,
             "chunk": chunk,
-            "security_issues_identified": state.get("security_issues_identified") or [],
         }))
 
         # Style agent - with linter output
@@ -52,11 +51,15 @@ def chunk_router(state:PRReviewState) -> list[Send]:
             **pr_context,
             "chunk": chunk,
             "linter_output": linter_outputs.get(i, {}),
-            "style_issues_identified": state.get("style_issues_identified") or [],
+        }))
+
+        sends.append(Send("logic_agent",{
+            **pr_context,
+            "chunk": chunk,
         }))
 
     logger.info(
         f"Chunk router - {len(sends)} total Send(s) dispatched "
-        f"({len(chunks)} chunks x 2 agents)"
+        f"({len(chunks)} chunks x 3 agents)"
     )
     return sends
