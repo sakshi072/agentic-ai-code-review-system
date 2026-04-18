@@ -28,19 +28,29 @@ def unescape_patches(files: list) -> list:
                 pass
     return files
 
-def build_llm(model:str, temperature:float, base_url:str):
-    return ChatOllama(
-        model= model or settings.DEFAULT_AGENT_MODEL_ID,
-        temperature=temperature or settings.DEFAULT_AGENT_TEMPERATURE,
-        base_url=base_url or settings.DEFAULT_AGENT_BASE_URL,
-        timeout=30,
+# def build_llm(model:str, temperature:float, base_url:str, ollama:bool):
+#     if ollama:
+#         return ChatOllama(
+#             model= model or settings.DEFAULT_AGENT_MODEL_ID,
+#             temperature=temperature or settings.DEFAULT_AGENT_TEMPERATURE,
+#             base_url=base_url or settings.DEFAULT_AGENT_BASE_URL,
+#             timeout=30,
+#         )
+    
+#     return ChatOpenAI(
+#         model="gpt-5-nano",
+#         temperature=0,
+#         api_key=settings.OPEN_API_KEY,
+
+#     )
+
+def build_llm():
+    return ChatOpenAI(
+        model="gpt-5-nano",
+        temperature=0,
+        api_key=settings.OPEN_API_KEY
+        
     )
-    # return ChatOpenAI(
-    #     model="gpt-4.1-nano",
-    #     temperature=0,
-    #     timeout=30,
-    #     api_key=settings.OPEN_API_KEY
-    # )
 
 def parse_mcp_response(raw_changes:Any) -> list:
     if isinstance(raw_changes, list):
@@ -225,37 +235,25 @@ def build_agent_prompt(
 ) -> str:
 
     prompt = (
-        f"Review PR #{pr_number} ({owner}/{repo}) for {focus}.\n\n"
-        "## Rules — read before reviewing\n"
-        "1. Only report issues in lines prefixed with '+' in the diff.\n"
-        "2. Every finding MUST have a line number.\n"
-        "Added lines in the diff are annotated as '+[line N]' — use N directly.\n"
-        "If a line has no annotation, skip the finding.\n\n"
+        f"REVIEW TASK: PR #{pr_number} ({owner}/{repo})\n"
+        "## STRICTOR RULES\n"
+        "1. Identify issues ONLY in lines starting with '+'.\n"
+        "2. Use the [line N] annotation as the line number.\n"
+        "---\n"
     )
 
     # ── Diff ──────────────────────────────────────────────────────────────────
-    prompt += f"## Diff\n{diff_context}\n\n"
+    prompt += f"Diff\n{diff_context}\n"
 
     # ── Linter output (mechanical violations) ────────────────────────────────
-    if linter_output:
-        prompt += (
-            "## Additional findings\n"
-            "Report only issues you can point to a specific line in the diff above.\n"
-            "For each finding you MUST have:\n"
-            "- A specific file and line number\n"
-            "- The exact line from the diff in code_snippet\n"
-            "Do NOT report general observations like 'this file has complexity issues'. "
-            "If you cannot point to a specific line, do not report the finding.\n\n"
-            "Look for:\n"
-            "- Unclear variable or function name on a specific added line\n"
-            "- Missing docstring on a specific added function or class\n"
-            "- Hardcoded value on a specific added line that should be a constant\n"
-            "- Bare except on a specific added line\n\n"
-            "Do NOT report whitespace, line length, or unused imports — "
-            "those are covered by the linter above.\n"
-        )
-        for filename, output in linter_output.items():
-            prompt += f"### {filename}\n```\n{output}\n```\n\n"
+    # if linter_output:
+    #     prompt += (
+    #         "Below is a condensed linter summary. "
+    #         "For each line number mentioned, cross-reference it with the [line N] markers in the diff to see the offending code. "
+    #         "Do NOT repeat the linter findings verbatim."
+    #     )
+    #     for filename, output in linter_output.items():
+    #         prompt += f"### {filename}\n```\n{output}\n```\n\n"
     
     return prompt
 
