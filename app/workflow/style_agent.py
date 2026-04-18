@@ -58,9 +58,11 @@ async def style_agent_node(payload:dict):
     )
     
     # Call structured LLM
-    structured_llm = build_llm("hermes3:3b", 0, "http://127.0.0.1:11434").with_structured_output(
-        StyleResponseSchema
-    )
+    # structured_llm = build_llm("hermes3:3b", 0, "http://127.0.0.1:11434", False).with_structured_output(
+    #     StyleResponseSchema
+    # )
+
+    structured_llm = build_llm().with_structured_output(StyleResponseSchema)
 
     try:
         response: StyleResponseSchema = await structured_llm.ainvoke([
@@ -109,8 +111,3 @@ async def style_agent_node(payload:dict):
         "style_findings": findings,
         "agents_completed": 1, 
     }
-
-
-
-    
-        

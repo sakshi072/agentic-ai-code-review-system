@@ -49,7 +49,8 @@ class RuffLinter(BaseLinter):
         return [
             "ruff", "check", tmp_path, 
             "--no-cache",
-            "--select", "F401,F811,F841,E501,E302,E303,W291,W293",
+            "--output-format", "concise",
+            "--select", "F401,F811,F841,E302,E303",
             "--ignore-noqa",
         ]
     
@@ -74,58 +75,54 @@ def _resolve_linter(filename:str) -> BaseLinter | None:
         if ext in linter.extensions:
             return linter
 
-def _enrich_linter_output(raw_output: str, full_content: str, filename: str) -> str:
+def _enrich_linter_output(raw_output: str, filename: str, tmp_path: str) -> str:
     """
-    Replace temp file paths with real filename and attach the actual
-    offending line content to each violation so the LLM has concrete
-    context rather than just an error code and character count.
+    Replace the temp file path with the real filename in ruff output.
+    Produces one line per finding: filename:line: [CODE] message
+    
+    ruff --output-format concise produces:
+      /tmp/tmpXXX.py:10:5: F401 `os` imported but unused
+    We replace the temp path and strip the column number for brevity.
     """
-    file_lines = full_content.splitlines()
-    enriched_lines = []
-
-    for raw_line in raw_output.splitlines():
-        # ruff/flake8 format: /tmp/xxx.py:LINE:COL: CODE message
-        match = re.match(r"^.+?:(\d+):(\d+):\s+(\S+)\s+(.+)$", raw_line)
-        if not match:
-            enriched_lines.append(raw_line)
-            continue
-
-        line_num  = int(match.group(1))
-        col       = match.group(2)
-        code      = match.group(3)
-        message   = match.group(4)
-
-        # Look up the actual offending line from full file content
-        actual_line = ""
-        if 1 <= line_num <= len(file_lines):
-            actual_line = file_lines[line_num - 1].rstrip()
-
-        enriched_lines.append(
-            f"{filename}:{line_num}:{col}: {code} {message}\n"
-            f"  offending line: {actual_line}"
-        )
-
-    return "\n".join(enriched_lines)
+    enriched = []
+    for line in raw_output.splitlines():
+        # Replace temp path with real filename
+        line = line.replace(tmp_path, filename)
+        # Match: filename:line:col: CODE message  → filename:line: [CODE] message
+        m = re.match(r"^(.+?):(\d+):\d+:\s+(\S+)\s+(.+)$", line)
+        if m:
+            enriched.append(f"{m.group(1)}:{m.group(2)}: [{m.group(3)}] {m.group(4)}")
+        elif line.strip():
+            enriched.append(line)
+    return "\n".join(enriched)
 
 def filter_linter_to_diff(
     linter_output: dict[str, str],
-    file_patches: dict[str, str]
+    file_patches: dict[str, str],
 ) -> dict[str, str]:
+    """
+    Filter linter findings to only lines that were actually added in the diff.
+    Uses the +[line N] annotations injected by format_files_for_llm.
+    """
     filtered = {}
     for filename, output in linter_output.items():
         patch = file_patches.get(filename, "")
-        # Just grab all line numbers mentioned in the patch header
-        changed_lines = set(re.findall(r"\+(\d+)", patch))
-        
+ 
+        # Extract line numbers from our diff annotations: +[line N]
+        changed_lines = set(re.findall(r"\+\[line (\d+)\]", patch))
+        # Fallback to hunk headers if annotations aren't present
+        if not changed_lines:
+            changed_lines = set(re.findall(r"\+(\d+)", patch))
+ 
         kept = []
-        for line in output.splitlines():
-            # Keep the line if it mentions a changed line number, or has no line ref
-            m = re.search(r":(\d+):", line)
-            if not m or m.group(1) in changed_lines:
-                kept.append(line)
-        
+        for issue_line in output.splitlines():
+            m = re.search(r":(\d+):", issue_line)
+            if m and m.group(1) in changed_lines:
+                kept.append(issue_line)
+ 
         if kept:
             filtered[filename] = "\n".join(kept)
+ 
     return filtered
 
 # Public API
@@ -172,16 +169,17 @@ async def run_linters(files:list, owner:str, repo:str, head_sha:str) -> dict[str
             continue
 
         tmp_path = linter._write_to_temp(full_content, ext)
-
         try:
             cmd = linter.build_cmd(tmp_path)
-            logger.info(f"Running {linter.name} on {filename} — cmd: {cmd}")
-            stdout,stderr,_ = linter._run_cmd(cmd) 
+            logger.info(f"Running {linter.name} on {filename}")
+            stdout, stderr, _ = linter._run_cmd(cmd)
             output = stdout or stderr
             if output.strip():
-                enriched = _enrich_linter_output(output.strip(), full_content, filename)
-                results[filename] = enriched
-                logger.info(f"{linter.name} output for {filename}:\n{output.strip()}")
+                # Pass tmp_path so the enricher can replace it with the real filename
+                enriched = _enrich_linter_output(output.strip(), filename, tmp_path)
+                if enriched.strip():
+                    results[filename] = enriched
+                    logger.info(f"{linter.name} output for {filename}:\n{enriched}")
         finally:
             os.unlink(tmp_path)
     return results
