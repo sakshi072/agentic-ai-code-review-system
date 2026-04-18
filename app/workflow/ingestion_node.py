@@ -116,23 +116,27 @@ async def ingestion_node(state: PRReviewState) -> dict:
         linter_output_flat = {}
     
     # Split into line-budgeted chunks at file boundaries
-    total_diff_lines = sum(len(f.get("patch", "").splitlines()) for f in to_analyze)
-    if total_diff_lines <= CHUNK_THRESHOLD_LINES:
-        logger.info(
-            f"Ingestion node — {total_diff_lines} lines, below threshold, "
-            f"skipping chunking"
-        )
-        file_chunks = [to_analyze]  # single chunk, no splitting
-    else:
-        logger.info(
-            f"Ingestion node — {total_diff_lines} lines, chunking at "
-            f"{MAX_LINES_PER_CHUNK} lines/chunk"
-        )
-        file_chunks = chunk_files_by_lines(to_analyze)
+    # total_diff_lines = sum(len(f.get("patch", "").splitlines()) for f in to_analyze)
+    # if total_diff_lines <= CHUNK_THRESHOLD_LINES:
+    #     logger.info(
+    #         f"Ingestion node — {total_diff_lines} lines, below threshold, "
+    #         f"skipping chunking"
+    #     )
+    #     file_chunks = [to_analyze]  # single chunk, no splitting
+    # else:
+    #     logger.info(
+    #         f"Ingestion node — {total_diff_lines} lines, chunking at "
+    #         f"{MAX_LINES_PER_CHUNK} lines/chunk"
+    #     )
+    #     file_chunks = chunk_files_by_lines(to_analyze)
+
+    file_chunks = [[f] for f in to_analyze]
+
+    logger.info(f"file chunks: {file_chunks}")
     
     logger.info(
         f"Ingestion node — {len(to_analyze)} files split into "
-        f"{len(file_chunks)} chunk(s) (budget: {MAX_LINES_PER_CHUNK} lines/chunk)"
+        f"{len(file_chunks)} chunk(s) (budget: 1 file/chunk)"
     )
 
     # Build chunk payloads and slice linter output per chunk
@@ -141,6 +145,7 @@ async def ingestion_node(state: PRReviewState) -> dict:
 
     for i, chunk_files in enumerate(file_chunks):
         diff_context = format_files_for_llm(chunk_files)
+
 
         if not diff_context.strip():
             logger.info(f"Ingestion node — chunk {i} has no reviewable content, skipping")
