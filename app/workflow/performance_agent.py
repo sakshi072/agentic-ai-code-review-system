@@ -137,7 +137,7 @@ async def performance_agent_node(payload: dict) -> dict:
             severity        = f.severity.value,
             file            = f.file if (f.file and f.file != "unknown") else actual_filename,
             line            = find_line_in_diff(
-                                  file_patches.get(f.file, ""),
+                                  file_patches.get(f.file if (f.file and f.file != "unknown") else actual_filename),
                                   f.code_snippet,
                               ),
             title           = f.title,
