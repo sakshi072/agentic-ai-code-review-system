@@ -20,7 +20,7 @@ Select exactly the top 5 findings. If the total quality is low, 2-3 high-quality
 
 # DROP CRITERIA (Zero Tolerance)
 - **Resolved:** Drop carried-over findings if the new diff shows the issue was fixed.
-- **Hallucination:** Drop if the `code_snippet` provided by the agent does not appear in the provided `diff_context`.
+- **Hallucination:** Drop if the `code_snippet` or file with issue provided by the agent does not appear in the provided `diff_context`.
 - **Subjective Noise:** Drop complaints about emojis, whitespace, or "I would have done it differently."
 - **Bad Line Numbers:** If you cannot verify the line number against the diff, drop it.
 - fix_code is identical to the code_snippet (restates existing code, not a fix)

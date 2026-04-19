@@ -72,6 +72,18 @@ class AgentFindingSchema(BaseModel):
             cleaned.append(line[1:] if line.startswith(("+", "-")) else line)
         return "\n".join(cleaned)
 
+    @model_validator(mode="after")
+    def fix_must_differ_from_snippet(self) -> "AgentFindingSchema":
+        """
+        Clear fix_code if it is semantically identical to code_snippet.
+        Catches the pattern where the LLM copies the existing added line
+        as both the snippet and the suggested fix.
+        """
+        if self.fix_code and self.code_snippet:
+            if _strip_diff_markers(self.fix_code) == _strip_diff_markers(self.code_snippet):
+                self.fix_code = ""
+        return self
+
 class ResponseSchema(BaseModel):
     findings: list[AgentFindingSchema] = Field(
         max_length=5,
@@ -153,16 +165,9 @@ class CuratedFinding(BaseModel):
         return "\n".join(cleaned)
 
     @model_validator(mode="after")
-    def reject_fix_identical_to_snippet(self) -> "CuratedFinding":
-        """
-        Clear fix_code if it is semantically identical to code_snippet.
-        The judge was copying the added line from the diff as both the
-        snippet AND the fix, making the fix useless (it already exists).
-        """
+    def fix_must_differ_from_snippet(self) -> "CuratedFinding":
         if self.fix_code and self.code_snippet:
-            clean_snippet = _strip_diff_markers(self.code_snippet)
-            clean_fix     = _strip_diff_markers(self.fix_code)
-            if clean_fix == clean_snippet:
+            if _strip_diff_markers(self.fix_code) == _strip_diff_markers(self.code_snippet):
                 self.fix_code = ""
         return self
 
