@@ -30,12 +30,6 @@ import json
 logger = logging.getLogger(__name__)
 checkpointer = InMemorySaver()
 
-# _judge_llm = ChatOllama(
-#     model="mistral-nemo",
-#     base_url="http://127.0.0.1:11434",
-#     temperature=0,
-# ).with_structured_output(JudgeOutput)
-
 _judge_llm = ChatOpenAI(
         model="gpt-5-nano",
         temperature=0,
@@ -47,6 +41,7 @@ async def _run_judge(
     security_findings: list[dict],
     style_findings: list[dict],
     logic_findings: list[dict],
+    performance_findings: list[dict],
     carried_over: list[dict],
     diff_context: str,
 ) -> list[CuratedFinding]:
@@ -60,6 +55,7 @@ async def _run_judge(
         n_security=len(security_findings),
         n_style=len(style_findings),
         n_logic = len(logic_findings),
+        n_performance = len(performance_findings),
         n_carried=len(carried_over),
         security_json=json.dumps(security_findings, indent=2, default=str),
         style_json=json.dumps(style_findings, indent=2, default=str),
@@ -75,7 +71,7 @@ async def _run_judge(
         ])
         logger.info(
             f"Judge — input: {len(security_findings)} security + "
-            f"{len(style_findings)} style + {len(logic_findings)} logic + {len(carried_over)} carried-over"
+            f"{len(style_findings)} style + {len(logic_findings)} logic + {len(performance_findings)} performance + {len(carried_over)} carried-over"
             f"→ {len(result.findings)} curated findings"
         )
         return result.findings
@@ -92,6 +88,7 @@ async def supervisor_node(state: PRReviewState):
     raw_security         = state.get("security_findings") or []
     raw_style            = state.get("style_findings") or []
     raw_logic          = state.get("logic_findings") or []
+    raw_performance = state.get("performance_findings") or []
     chunks               = state.get("chunks") or []
     n_expected           = len(chunks) * 3
     n_completed          = state.get("agents_completed", 0)
@@ -101,7 +98,7 @@ async def supervisor_node(state: PRReviewState):
 
     logger.info(
         f"Supervisor — {n_completed}/{n_expected} agents done | "
-        f"{len(raw_security)} security, {len(raw_style)} style findings, {len(raw_logic)} logic findings"
+        f"{len(raw_security)} security, {len(raw_style)} style findings, {len(raw_logic)} logic, {len(raw_performance)} performance findings"
     )
  
     # ── Guard: no chunks dispatched (all files unchanged) ────────────────────
@@ -143,7 +140,7 @@ async def supervisor_node(state: PRReviewState):
  
     logger.info(
         f"Supervisor — sending to judge: "
-        f"{len(raw_security)} security + {len(raw_style)} style + {len(raw_logic)} logic + "
+        f"{len(raw_security)} security + {len(raw_style)} style + {len(raw_logic)} logic + {len(raw_performance)} performance +"
         f"{len(carried_over)} carried-over"
     )
     
@@ -161,7 +158,7 @@ async def supervisor_node(state: PRReviewState):
     )
 
     # ── LLM judge: curate all findings into one unified list
-    curated = await _run_judge(raw_security, raw_style, raw_logic, carried_over, diff_context)
+    curated = await _run_judge(raw_security, raw_style, raw_logic, raw_performance, carried_over, diff_context)
 
     for f in curated:
         logger.info(f"logging curated findings: {f}")

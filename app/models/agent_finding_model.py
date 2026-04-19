@@ -11,7 +11,7 @@ from app.models.workflow_state import Severity
 from typing import Optional
 import re
 
-FINDING_TYPES = ("security", "style", "logic")
+FINDING_TYPES = ("security", "style", "logic", "performance")
 SEVERITIES    = ("critical", "high", "medium", "low", "info")
 
 
@@ -72,29 +72,42 @@ class AgentFindingSchema(BaseModel):
             cleaned.append(line[1:] if line.startswith(("+", "-")) else line)
         return "\n".join(cleaned)
 
-
-class SecurityResponseSchema(BaseModel):
+class ResponseSchema(BaseModel):
     findings: list[AgentFindingSchema] = Field(
         max_length=5,
         default_factory=list,
         description="Top 5 most critical security findings only"
     )
 
+# class SecurityResponseSchema(BaseModel):
+#     findings: list[AgentFindingSchema] = Field(
+#         max_length=5,
+#         default_factory=list,
+#         description="Top 5 most critical security findings only"
+#     )
 
-class StyleResponseSchema(BaseModel):
-    findings: list[AgentFindingSchema] = Field(
-        max_length=5,
-        default_factory=list,
-        description="Top 5 most critical style findings only"
-    )
+
+# class StyleResponseSchema(BaseModel):
+#     findings: list[AgentFindingSchema] = Field(
+#         max_length=5,
+#         default_factory=list,
+#         description="Top 5 most critical style findings only"
+#     )
 
 
-class LogicResponseSchema(BaseModel):
-    findings: list[AgentFindingSchema] = Field(
-        max_length=5,
-        default_factory=list,
-        description="Top 5 most critical logic findings only"
-    )
+# class LogicResponseSchema(BaseModel):
+#     findings: list[AgentFindingSchema] = Field(
+#         max_length=5,
+#         default_factory=list,
+#         description="Top 5 most critical logic findings only"
+#     )
+
+# class PerformanceResponseSchema(BaseModel):
+#     findings: list[AgentFindingSchema] = Field(
+#         max_length=5,
+#         default_factory=list,
+#         description="Top 5 most critical logic findings only"
+#     )
 
 
 class CuratedFinding(BaseModel):

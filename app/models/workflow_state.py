@@ -88,6 +88,7 @@ class PRReviewState(TypedDict):
     security_findings: Annotated[list[AgentFinding], add]
     style_findings: Annotated[list[AgentFinding], add]
     logic_findings: Annotated[list[AgentFinding], add]
+    performance_findings: Annotated[list[AgentFinding], add]
     
     # SHA map — merged across runs so unchanged files are skipped
     analyzed_file_shas:  Annotated[dict[str, str], merge_dicts]

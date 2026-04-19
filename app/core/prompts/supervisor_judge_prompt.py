@@ -43,6 +43,9 @@ Style agent ({n_style} findings):
 Logic agent ({n_logic} findings):
 {logic_json}
 
+Performance agent ({n_performance} findings):
+{performance_json}
+
 ## Carried-over findings from previous run ({n_carried} findings)
 These are from files not changed in this commit — valid to include unless duplicate or resolved.
 {carried_json}

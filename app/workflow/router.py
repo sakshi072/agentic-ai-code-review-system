@@ -41,19 +41,24 @@ def chunk_router(state:PRReviewState) -> list[Send]:
             continue
 
         # Security agent - no linter output needed
-        sends.append(Send("security_agent", {
-            **pr_context,
-            "chunk": chunk,
-        }))
+        # sends.append(Send("security_agent", {
+        #     **pr_context,
+        #     "chunk": chunk,
+        # }))
 
-        # Style agent - with linter output
-        sends.append(Send("style_agent",{
-            **pr_context,
-            "chunk": chunk,
-            "linter_output": linter_outputs.get(i, {}),
-        }))
+        # # Style agent - with linter output
+        # sends.append(Send("style_agent",{
+        #     **pr_context,
+        #     "chunk": chunk,
+        #     "linter_output": linter_outputs.get(i, {}),
+        # }))
 
-        sends.append(Send("logic_agent",{
+        # sends.append(Send("logic_agent",{
+        #     **pr_context,
+        #     "chunk": chunk,
+        # }))
+
+        sends.append(Send("performance_agent",{
             **pr_context,
             "chunk": chunk,
         }))
