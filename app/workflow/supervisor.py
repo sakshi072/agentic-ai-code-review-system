@@ -61,6 +61,7 @@ async def _run_judge(
         security_json=json.dumps(security_findings, indent=2, default=str),
         style_json=json.dumps(style_findings, indent=2, default=str),
         logic_json = json.dumps(logic_findings, indent=2, default=str),
+        performance_json = json.dumps(performance_findings, indent=2, default=str),
         carried_json=json.dumps(carried_over, indent=2, default=str),
         diff_context=diff_context[:6000],
     )
@@ -91,7 +92,7 @@ async def supervisor_node(state: PRReviewState):
     raw_logic          = state.get("logic_findings") or []
     raw_performance = state.get("performance_findings") or []
     chunks               = state.get("chunks") or []
-    n_expected           = len(chunks) * 4
+    n_expected           = len(chunks) * 1
     n_completed          = state.get("agents_completed", 0)
     prior_review_id      = state.get("prior_review_id")
     prior_review_node_id = state.get("prior_review_node_id")
