@@ -108,7 +108,7 @@ async def search_callers(owner:str, repo:str, function_name:str) -> str:
     
     resp.raise_for_status()
 
-    items = resp.json().get("iterms", [])[:10]
+    items = resp.json().get("items", [])[:10]
 
     results = []
     for item in items:

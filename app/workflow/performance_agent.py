@@ -28,20 +28,20 @@ from app.models.workflow_state import AgentFinding
 logger = logging.getLogger(__name__)
 
 PERFORMANCE_AGENT_TOOLS = [fetch_reviewed_file, ast_analyze, search_callers]
-
+_AGENT_TIMEOUT_SECONDS = 120
 # ---------------------------------------------------------------------------
 # Performance agent node
 # ---------------------------------------------------------------------------
 async def performance_agent_node(payload: dict) -> dict:
     """
-    LangGraph node — logical code review on one diff chunk.
+    LangGraph node — performance code review on one diff chunk.
  
     Receives (via Send payload):
         owner, repo, pr_number, head_sha  — PR identity
         chunk                              — {files, diff_context, file_patches}
  
     Returns:
-        logic_findings   — list[AgentFinding] (accumulated via add reducer)
+        performance_findings   — list[AgentFinding] (accumulated via add reducer)
         agents_completed — 1
     """
     owner     = payload["owner"]
@@ -53,15 +53,16 @@ async def performance_agent_node(payload: dict) -> dict:
     to_analyze   = chunk["files"]
     diff_context = chunk["diff_context"]
     file_patches = chunk["file_patches"]
+    actual_filename = to_analyze[0].get("filename") if to_analyze else "unknown"
  
     logger.info(
-        f"Logic agent starting — {owner}/{repo}/#{pr_number} "
+        f"Performance agent starting — {owner}/{repo}/#{pr_number} "
         f"({len(to_analyze)} file(s) in chunk)"
     )
  
     if not diff_context.strip():
-        logger.info("Logic agent — empty diff, skipping")
-        return {"logic_findings": [], "agents_completed": 1}
+        logger.info("Performance agent — empty diff, skipping")
+        return {"performance_findings": [], "agents_completed": 1}
  
     # ------------------------------------------------------------------
     # Build the agent
@@ -76,6 +77,7 @@ async def performance_agent_node(payload: dict) -> dict:
         model=llm,
         tools=PERFORMANCE_AGENT_TOOLS,
         system_prompt=PERFORMANCE_AGENT_SYSTEM_PROMPT,  # system message injected into every turn
+        response_format=ResponseSchema,
     )
  
     # Build the user prompt
@@ -104,42 +106,27 @@ async def performance_agent_node(payload: dict) -> dict:
     # Run the agent
     # ------------------------------------------------------------------
     try:
-        result = await agent.ainvoke(
-            {"messages": [HumanMessage(content=user_prompt)]},
-            config={"recursion_limit": 4},
+        result = await asyncio.wait_for(
+            agent.ainvoke(
+                {"messages": [HumanMessage(content=user_prompt)]},
+                config={"recursion_limit": 10},
+            ),
+            timeout=_AGENT_TIMEOUT_SECONDS,
         )
-        # create_react_agent returns {"messages": [...]}
-        final_message = result["messages"][-1].content
-        logger.info(
-            f"Performance agent — agentic loop complete, "
-            f"final output length: {len(final_message)} chars"
-        )
-    except Exception as exc:
-        logger.error(f"Performance agent — agent failed: {exc}", exc_info=True)
-        return {"performance_findings": [], "agents_completed": 1}
+        response: ResponseSchema = result.get("structured_response")
+        if response is None:
+            logger.warning("Performance agent — no structured_response, returning empty")
+            return {"performance_findings": [], "agents_completed": 1}
  
-    # ------------------------------------------------------------------
-    # Parse structured findings from the agent's final message.
-    # A second structured-output call converts the agent's prose/JSON
-    # output into a validated LogicResponseSchema.
-    # ------------------------------------------------------------------
-    structured_llm = llm.with_structured_output(ResponseSchema)
- 
-    try:
-        response: ResponseSchema = await structured_llm.ainvoke(
-            f"Extract structured performance findings from this code review output.\n"
-            f"Include ONLY performance issues.\n"
-            f"Each finding must have a line number from the diff [line N] annotations.\n\n"
-            f"{final_message}"
-        )
-        logger.info(f"Performance agent — {len(response.findings)} finding(s) parsed")
+        logger.info(f"Performance agent — {len(response.findings)} finding(s)")
         for f in response.findings:
-            logger.info(
-                f"  [{f.severity}] {f.title} | "
-                f"file={f.file} | snippet={f.code_snippet[:50]!r}"
-            )
+            logger.info(f"  [{f.severity}] {f.title} | file={f.file} | snippet={f.code_snippet[:60]!r}")
+ 
+    except asyncio.TimeoutError:
+        logger.warning(f"Performance agent — timed out after {_AGENT_TIMEOUT_SECONDS}s")
+        return {"performance_findings": [], "agents_completed": 1}
     except Exception as exc:
-        logger.error(f"Performance agent — structured output parse failed: {exc}")
+        logger.error(f"Performance agent — failed: {exc}", exc_info=True)
         return {"performance_findings": [], "agents_completed": 1}
  
     # ------------------------------------------------------------------
@@ -148,7 +135,7 @@ async def performance_agent_node(payload: dict) -> dict:
     findings: list[AgentFinding] = [
         AgentFinding(
             severity        = f.severity.value,
-            file            = f.file,
+            file            = f.file if (f.file and f.file != "unknown") else actual_filename,
             line            = find_line_in_diff(
                                   file_patches.get(f.file, ""),
                                   f.code_snippet,

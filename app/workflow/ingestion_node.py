@@ -21,7 +21,27 @@ from app.utils.agent_helper import (
 from app.tools.linter import run_linters, filter_linter_to_diff
 
 logger = logging.getLogger(__name__)
-MAX_LINES_PER_CHUNK = 500
+
+MAX_LINES_PER_CHUNK   = 500
+CHUNK_THRESHOLD_LINES = 500
+
+def chunk_files_by_lines(files: list[dict]) -> list[list[dict]]:
+    chunks: list[list[dict]] = []
+    current_chunk: list[dict] = []
+    current_lines = 0
+ 
+    for f in files:
+        file_lines = len(f.get("patch", "").splitlines())
+        if current_chunk and current_lines + file_lines > MAX_LINES_PER_CHUNK:
+            chunks.append(current_chunk)
+            current_chunk = []
+            current_lines = 0
+        current_chunk.append(f)
+        current_lines += file_lines
+ 
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
 
 async def ingestion_node(state: PRReviewState) -> dict:
     """
@@ -66,6 +86,8 @@ async def ingestion_node(state: PRReviewState) -> dict:
             "analyzed_file_shas": updated_shas(prev_shas, files),
             "security_findings":   [],   # ← reset before fan-out
             "style_findings":      [],   # ← reset before fan-out
+            "logic_findings": [],
+            "performance_findings": [],
             "pr_files": files,
             "agents_completed":   0
         }
@@ -89,17 +111,19 @@ async def ingestion_node(state: PRReviewState) -> dict:
         linter_output_flat = {}
     
     # Split into file-budgeted chunks at file boundaries
-    
-    logger.info(
-        f"Ingestion node — {len(to_analyze)} files, chunking at "
-        f"1 file/chunk"
-    )
-    file_chunks = [[f] for f in to_analyze]
-    
-    logger.info(
-        f"Ingestion node — {len(to_analyze)} files split into "
-        f"{len(file_chunks)} chunk(s) (budget: {MAX_LINES_PER_CHUNK} lines/chunk)"
-    )
+    total_diff_lines = sum(len(f.get("patch", "").splitlines()) for f in to_analyze)
+ 
+    if total_diff_lines <= CHUNK_THRESHOLD_LINES:
+        logger.info(
+            f"Ingestion node — {total_diff_lines} lines across {len(to_analyze)} file(s), "
+            f"below threshold ({CHUNK_THRESHOLD_LINES}), single chunk"
+        )
+        file_chunks = [to_analyze]
+    else:
+        logger.info(f"Ingestion node — {total_diff_lines} lines, splitting at {MAX_LINES_PER_CHUNK}/chunk")
+        file_chunks = chunk_files_by_lines(to_analyze)
+ 
+    logger.info(f"Ingestion node — {len(to_analyze)} file(s) → {len(file_chunks)} chunk(s)")
 
     # Build chunk payloads and slice linter output per chunk
     chunks: list[dict] = []
