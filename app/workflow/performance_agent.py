@@ -32,7 +32,7 @@ PERFORMANCE_AGENT_TOOLS = [fetch_reviewed_file, ast_analyze, search_callers]
 # ---------------------------------------------------------------------------
 # Performance agent node
 # ---------------------------------------------------------------------------
-async def logic_agent_node(payload: dict) -> dict:
+async def performance_agent_node(payload: dict) -> dict:
     """
     LangGraph node — logical code review on one diff chunk.
  

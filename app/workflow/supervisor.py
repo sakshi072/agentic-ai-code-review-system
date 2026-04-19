@@ -15,6 +15,7 @@ from app.core.configs.github_server_config import MCPTool
 from app.workflow.style_agent import style_agent_node
 from app.workflow.ingestion_node import ingestion_node
 from app.workflow.logic_agent import logic_agent_node
+from app.workflow.performance_agent import performance_agent_node
 from langgraph.checkpoint.memory import InMemorySaver
 from app.utils.supervisor_helper import decide_review_outcome, format_review_body, build_inline_comments
 from app.workflow.router import chunk_router
@@ -90,7 +91,7 @@ async def supervisor_node(state: PRReviewState):
     raw_logic          = state.get("logic_findings") or []
     raw_performance = state.get("performance_findings") or []
     chunks               = state.get("chunks") or []
-    n_expected           = len(chunks) * 3
+    n_expected           = len(chunks) * 4
     n_completed          = state.get("agents_completed", 0)
     prior_review_id      = state.get("prior_review_id")
     prior_review_node_id = state.get("prior_review_node_id")
@@ -249,7 +250,7 @@ def supervisor_pipeline():
     graph.add_node("style_agent", style_agent_node)
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("logic_agent", logic_agent_node)
-
+    graph.add_node("performance_agent", performance_agent_node)
     # Wire edges
     # Ingestion runs first, alone
     graph.add_edge(START, "ingestion")
@@ -263,6 +264,7 @@ def supervisor_pipeline():
     graph.add_edge("security_agent", "supervisor")
     graph.add_edge("style_agent", "supervisor")
     graph.add_edge("logic_agent", "supervisor")
+    graph.add_edge("performance_agent", "supervisor")
     graph.add_edge("supervisor", END)
 
     compiled = graph.compile(checkpointer=checkpointer)
