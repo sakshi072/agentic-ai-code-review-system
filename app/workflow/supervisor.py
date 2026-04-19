@@ -44,7 +44,6 @@ async def _run_judge(
     logic_findings: list[dict],
     performance_findings: list[dict],
     carried_over: list[dict],
-    diff_context: str,
 ) -> list[CuratedFinding]:
     """
     Run the LLM judge over all findings — current run + carried-over.
@@ -63,7 +62,6 @@ async def _run_judge(
         logic_json = json.dumps(logic_findings, indent=2, default=str),
         performance_json = json.dumps(performance_findings, indent=2, default=str),
         carried_json=json.dumps(carried_over, indent=2, default=str),
-        diff_context=diff_context[:6000],
     )
 
     try:
@@ -156,7 +154,7 @@ async def supervisor_node(state: PRReviewState):
     logger.info(
         f"Agent findings with line numbers: "
         f"{sum(1 for f in raw_security + raw_style if f.get('line'))}/"
-        f"{len(raw_security) + len(raw_style)}"
+        f"{len(raw_security) + len(raw_style) + len(raw_logic) + len(raw_performance)}"
     )
 
     # ── LLM judge: curate all findings into one unified list
