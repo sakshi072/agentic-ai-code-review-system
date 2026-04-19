@@ -34,7 +34,7 @@ def _build_ast_report(source:str) -> dict[str, Any]:
             file_max_depth = max(file_max_depth, loop_depth)
             if func_stack:
                 func_stack[-1]["max_loop_depth"] = max(
-                    func_stack[-1]["max_loop_depth", loop_depth]
+                    func_stack[-1]["max_loop_depth"], loop_depth
                 )
             self.generic_visit(node)
             loop_depth -= 1
@@ -99,12 +99,14 @@ async def search_callers(owner:str, repo:str, function_name:str) -> str:
             headers=_GITHUB_HEADERS,
         )
     
-    if resp.status_code == 403:
-        return (
-            f"[RATE LIMITED] GitHub code search rate limit hit — "
-            f"cannot determine caller frequency for '{function_name}'. "
-            "Treat the issue severity based on the diff alone."
-        )
+    if resp.status_code in (403, 429):
+        if resp.status_code == 403:
+            return (
+                f"[RATE LIMITED] GitHub code search rate limit hit \u00e2\u0080\u0094 "
+                f"cannot determine caller frequency for '{function_name}'. "
+                "Treat the issue severity based on the diff alone."
+            )
+        return "GitHub code search rate limit exceeded"
     
     resp.raise_for_status()
 
