@@ -143,13 +143,6 @@ async def supervisor_node(state: PRReviewState):
         f"{len(raw_security)} security + {len(raw_style)} style + {len(raw_logic)} logic + {len(raw_performance)} performance +"
         f"{len(carried_over)} carried-over"
     )
-    
-    # ── Aggregate diff context across all chunks
-    diff_context = "\n\n".join(
-        chunk.get("diff_context", "") for chunk in chunks
-    )
-
-    logger.info(f"diff context with line number : {diff_context}")
 
     logger.info(
         f"Agent findings with line numbers: "
@@ -158,7 +151,7 @@ async def supervisor_node(state: PRReviewState):
     )
 
     # ── LLM judge: curate all findings into one unified list
-    curated = await _run_judge(raw_security, raw_style, raw_logic, raw_performance, carried_over, diff_context)
+    curated = await _run_judge(raw_security, raw_style, raw_logic, raw_performance, carried_over)
 
     for f in curated:
         logger.info(f"logging curated findings: {f}")
