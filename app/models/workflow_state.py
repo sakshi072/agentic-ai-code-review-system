@@ -82,14 +82,14 @@ class PRReviewState(TypedDict):
     # Per-chunk linter results — keyed by chunk index (int).
     # Stored separately from chunks so the router can forward it exclusively
     # to style_agent Sends; security_agent never receives it.
-    linter_outputs: Optional[dict[int, dict[str, str]]]
+    linter_outputs: Optional[list[AgentFinding]]
 
     # Agent Finding - each agent writes its own key
     security_findings: Annotated[list[AgentFinding], add]
     style_findings: Annotated[list[AgentFinding], add]
     logic_findings: Annotated[list[AgentFinding], add]
     performance_findings: Annotated[list[AgentFinding], add]
-    
+
     # SHA map — merged across runs so unchanged files are skipped
     analyzed_file_shas:  Annotated[dict[str, str], merge_dicts]
     

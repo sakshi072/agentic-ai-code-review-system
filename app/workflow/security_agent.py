@@ -1,4 +1,4 @@
-from app.models.agent_finding_model import SecurityResponseSchema
+from app.models.agent_finding_model import ResponseSchema
 from app.models.workflow_state import AgentFinding
 from app.utils.agent_helper import (
     build_llm, 
@@ -51,10 +51,10 @@ async def security_agent_node(payload:dict) -> dict:
     #     SecurityResponseSchema
     # )
 
-    structured_llm = build_llm().with_structured_output(SecurityResponseSchema)
+    structured_llm = build_llm().with_structured_output(ResponseSchema)
 
     try:
-        response: SecurityResponseSchema = await structured_llm.ainvoke([
+        response: ResponseSchema = await structured_llm.ainvoke([
             SystemMessage(content=SECURITY_AGENT_SYSTEM_PROMPT),
             HumanMessage(content=prompt),
         ])

@@ -85,9 +85,10 @@ async def supervisor_node(state: PRReviewState):
     Synthesizes findings → decides review outcome → posts to GitHub.
     """
     raw_security         = state.get("security_findings") or []
-    raw_style            = state.get("style_findings") or []
+    raw_style_no_linter  = state.get("style_findings") or []
     raw_logic          = state.get("logic_findings") or []
     raw_performance = state.get("performance_findings") or []
+    raw_linter = state.get("linter_outputs") or []
     chunks               = state.get("chunks") or []
     n_expected           = len(chunks) * 4
     n_completed          = state.get("agents_completed", 0)
@@ -97,7 +98,7 @@ async def supervisor_node(state: PRReviewState):
 
     logger.info(
         f"Supervisor — {n_completed}/{n_expected} agents done | "
-        f"{len(raw_security)} security, {len(raw_style)} style findings, {len(raw_logic)} logic, {len(raw_performance)} performance findings"
+        f"{len(raw_security)} security, {len(raw_style_no_linter)} style findings, {len(raw_logic)} logic, {len(raw_performance)} performance findings"
     )
  
     # ── Guard: no chunks dispatched (all files unchanged) ────────────────────
@@ -119,7 +120,7 @@ async def supervisor_node(state: PRReviewState):
     
     logger.info(
         f"Supervisor — raw: {len(raw_security)} security, "
-        f"{len(raw_style)} style"
+        f"{len(raw_style_no_linter)} style"
     )
 
     # ── Compute carried-over issues from unchanged files
@@ -130,6 +131,7 @@ async def supervisor_node(state: PRReviewState):
         for chunk in chunks
         for f in chunk["files"]
     }
+    raw_style = raw_style_no_linter + raw_linter
 
     carried_over = [
         issue for issue in prev_all

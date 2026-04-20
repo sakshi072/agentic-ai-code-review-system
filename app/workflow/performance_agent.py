@@ -14,8 +14,7 @@ response_format gives us structured output in one pass (no second LLM call).
 import asyncio
 import logging
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
 from langchain.agents import create_agent
 from app.tools.gihub_files import fetch_reviewed_file
 from app.tools.performance_tools import ast_analyze, search_callers
@@ -53,7 +52,6 @@ async def performance_agent_node(payload: dict) -> dict:
     to_analyze   = chunk["files"]
     diff_context = chunk["diff_context"]
     file_patches = chunk["file_patches"]
-    actual_filename = to_analyze[0].get("filename") if to_analyze else "unknown"
  
     logger.info(
         f"Performance agent starting — {owner}/{repo}/#{pr_number} "
@@ -135,9 +133,9 @@ async def performance_agent_node(payload: dict) -> dict:
     findings: list[AgentFinding] = [
         AgentFinding(
             severity        = f.severity.value,
-            file            = f.file if (f.file and f.file != "unknown") else actual_filename,
+            file            = f.file,
             line            = find_line_in_diff(
-                                  file_patches.get(f.file if (f.file and f.file != "unknown") else actual_filename),
+                                  file_patches.get(f.file, ""),
                                   f.code_snippet,
                               ),
             title           = f.title,

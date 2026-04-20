@@ -5,9 +5,18 @@ import json
 import logging
 from typing import List
 from app.utils.agent_helper import fetch_full_file
+from app.models.workflow_state import AgentFinding
 import re 
 
 logger = logging.getLogger(__name__)
+
+PYTHON_LINTER_SEVERITY = {
+    "F401": ("low",    "Unused import"),
+    "F811": ("medium", "Redefined unused name"),
+    "F841": ("low",    "Local variable assigned but never used"),
+    "E302": ("low",    "Expected 2 blank lines"),
+    "E303": ("low",    "Too many blank lines"),
+}
 
 # Base class with shared helpers
 
@@ -122,8 +131,30 @@ def filter_linter_to_diff(
  
         if kept:
             filtered[filename] = "\n".join(kept)
+
+    findings = []
+    for filename, output in filtered.items():
+        patch = file_patches.get(filename, "")
+        for line in output.splitlines():
+            # Format: filename:line: [CODE] message
+            m = re.match(r".+:(\d+):\s+\[(\w+)\]\s+(.+)", line)
+            if not m:
+                continue
+            line_num, code, message = m.group(1), m.group(2), m.group(3)
+            if code not in PYTHON_LINTER_SEVERITY:
+                continue
+            severity, title = PYTHON_LINTER_SEVERITY[code]
+            findings.append(AgentFinding(
+                severity=severity,
+                file=filename,
+                line=int(line_num),
+                title=title,
+                description=message,
+                fix_explanation=f"Fix {code} violation on line {line_num}",
+                fix_code="",
+            ))
  
-    return filtered
+    return findings
 
 # Public API
 async def run_linters(files:list, owner:str, repo:str, head_sha:str) -> dict[str, str]:

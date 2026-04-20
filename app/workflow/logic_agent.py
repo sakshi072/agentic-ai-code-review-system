@@ -12,17 +12,18 @@ focused tools, then produces structured findings.
 """
  
 import logging
- 
-from langchain_core.messages import HumanMessage, SystemMessage
+import asyncio
+from langchain_core.messages import HumanMessage
 from langchain.agents import create_agent
  
 from app.core.prompts.logic_agent_prompt import LOGIC_AGENT_SYSTEM_PROMPT
-from app.models.agent_finding_model import LogicResponseSchema
+from app.models.agent_finding_model import ResponseSchema
 from app.models.workflow_state import AgentFinding
 from app.tools.gihub_files import fetch_import_file, fetch_reviewed_file
 from app.utils.agent_helper import build_agent_prompt, build_llm, find_line_in_diff
  
 logger = logging.getLogger(__name__)
+_AGENT_TIMEOUT_SECONDS=300
  
 # Tools the logic agent is allowed to call.
 # Both are top-level async @tool functions — no closures, no hidden state.
@@ -72,7 +73,7 @@ async def logic_agent_node(payload: dict) -> dict:
         model=llm,
         tools=LOGIC_AGENT_TOOLS,
         system_prompt=LOGIC_AGENT_SYSTEM_PROMPT,  # system message injected into every turn
-        response_format=LogicResponseSchema
+        response_format=ResponseSchema
     )
  
     # ------------------------------------------------------------------
@@ -102,43 +103,27 @@ async def logic_agent_node(payload: dict) -> dict:
     # recursion_limit caps the think→tool→observe loop at 10 iterations.
     # ------------------------------------------------------------------
     try:
-        result = await agent.ainvoke(
-            {"messages": [HumanMessage(content=user_prompt)]},
-            config={"recursion_limit": 4},
+        result = await asyncio.wait_for(
+            agent.ainvoke(
+                {"messages": [HumanMessage(content=user_prompt)]},
+                config={"recursion_limit": 10},
+            ),
+            timeout=_AGENT_TIMEOUT_SECONDS,
         )
-        # create_react_agent returns {"messages": [...]}
-        # The final AI message is the agent's review output
-        final_message = result["messages"][-1].content
-        logger.info(
-            f"Logic agent — agentic loop complete, "
-            f"final output length: {len(final_message)} chars"
-        )
-    except Exception as exc:
-        logger.error(f"Logic agent — agent failed: {exc}", exc_info=True)
-        return {"logic_findings": [], "agents_completed": 1}
+        response: ResponseSchema = result.get("structured_response")
+        if response is None:
+            logger.warning("Logic agent — no structured_response, returning empty")
+            return {"logic_findings": [], "agents_completed": 1}
  
-    # ------------------------------------------------------------------
-    # Parse structured findings from the agent's final message.
-    # A second structured-output call converts the agent's prose/JSON
-    # output into a validated LogicResponseSchema.
-    # ------------------------------------------------------------------
-    structured_llm = llm.with_structured_output(LogicResponseSchema)
- 
-    try:
-        response: LogicResponseSchema = await structured_llm.ainvoke(
-            f"Extract structured logic findings from this code review output.\n"
-            f"Include ONLY logic issues — not style, not security.\n"
-            f"Each finding must have a line number from the diff [line N] annotations.\n\n"
-            f"{final_message}"
-        )
-        logger.info(f"Logic agent — {len(response.findings)} finding(s) parsed")
+        logger.info(f"Logic agent — {len(response.findings)} finding(s)")
         for f in response.findings:
-            logger.info(
-                f"  [{f.severity}] {f.title} | "
-                f"file={f.file} | snippet={f.code_snippet[:50]!r}"
-            )
+            logger.info(f"  [{f.severity}] {f.title} | file={f.file} | snippet={f.code_snippet[:60]!r}")
+ 
+    except asyncio.TimeoutError:
+        logger.warning(f"Logic agent — timed out after {_AGENT_TIMEOUT_SECONDS}s")
+        return {"logic_findings": [], "agents_completed": 1}
     except Exception as exc:
-        logger.error(f"Logic agent — structured output parse failed: {exc}")
+        logger.error(f"Logic agent — failed: {exc}", exc_info=True)
         return {"logic_findings": [], "agents_completed": 1}
  
     # ------------------------------------------------------------------

@@ -10,7 +10,6 @@ def chunk_router(state:PRReviewState) -> list[Send]:
     Conditional edge: ingestion → [security_agent, style_agent, logic agent] × N chunks.
     """
     chunks = state.get("chunks") or []
-    linter_outputs = state.get("linter_outputs") or {}
 
     if not chunks:
         logger.info("Chunk router - no chunks to dispatch, skipping agents")
@@ -50,7 +49,6 @@ def chunk_router(state:PRReviewState) -> list[Send]:
         sends.append(Send("style_agent",{
             **pr_context,
             "chunk": chunk,
-            "linter_output": linter_outputs.get(i, {}),
         }))
 
         sends.append(Send("logic_agent",{

@@ -102,6 +102,21 @@ async def ingestion_node(state: PRReviewState) -> dict:
             repo=repo,
             head_sha=head_sha
         )
+
+        patches = {
+            f.get("filename"): f.get("patch", "")
+            for f in to_analyze
+        }
+
+        linter_outputs = filter_linter_to_diff(
+            {
+                filename: output
+                for filename, output in linter_output_flat.items()
+                if filename in to_analyze
+            },
+            patches
+        )
+
         logger.info(
             f"Ingestion node — linting complete, "
             f"{len(linter_output_flat)} files with output"
@@ -127,7 +142,6 @@ async def ingestion_node(state: PRReviewState) -> dict:
 
     # Build chunk payloads and slice linter output per chunk
     chunks: list[dict] = []
-    linter_outputs: dict[int, dict[str, str]] = {}
 
     for i, chunk_files in enumerate(file_chunks):
         diff_context = format_files_for_llm(chunk_files)
@@ -143,14 +157,6 @@ async def ingestion_node(state: PRReviewState) -> dict:
 
         # Slice linter output to only filename in this chunk
         chunk_filenames = {f.get("filename") for f in chunk_files}
-        linter_outputs[i] = filter_linter_to_diff(
-            {
-                filename: output
-                for filename, output in linter_output_flat.items()
-                if filename in chunk_filenames
-            },
-            file_patches
-        )
 
         chunks.append({
             "files": chunk_files,
