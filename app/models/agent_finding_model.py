@@ -90,42 +90,11 @@ class ResponseSchema(BaseModel):
         default_factory=list,
         description="Top 5 most critical security findings only"
     )
-
-# class SecurityResponseSchema(BaseModel):
-#     findings: list[AgentFindingSchema] = Field(
-#         max_length=5,
-#         default_factory=list,
-#         description="Top 5 most critical security findings only"
-#     )
-
-
-# class StyleResponseSchema(BaseModel):
-#     findings: list[AgentFindingSchema] = Field(
-#         max_length=5,
-#         default_factory=list,
-#         description="Top 5 most critical style findings only"
-#     )
-
-
-# class LogicResponseSchema(BaseModel):
-#     findings: list[AgentFindingSchema] = Field(
-#         max_length=5,
-#         default_factory=list,
-#         description="Top 5 most critical logic findings only"
-#     )
-
-# class PerformanceResponseSchema(BaseModel):
-#     findings: list[AgentFindingSchema] = Field(
-#         max_length=5,
-#         default_factory=list,
-#         description="Top 5 most critical logic findings only"
-#     )
-
-
+    
 class CuratedFinding(BaseModel):
     """Single finding after LLM judge curation."""
 
-    finding_type:    str = Field(description="One of: security, style, logic")
+    finding_type:    str = Field(description="One of: security, style, logic, performance")
     severity:        str = Field(description="One of: critical, high, medium, low, info")
     file:            str = Field(description="File path where the issue was found")
     line:            int = Field(description="Line number — copied from source finding")
@@ -157,7 +126,7 @@ class CuratedFinding(BaseModel):
     def clean_fix_code(cls, v: str) -> str:
         if not v or str(v).strip().upper() in ("EMPTY", "N/A", "NONE", ""):
             return ""
-        if any(marker in str(v) for marker in ("## Diff", "## PR diff", "### Security", "### Style", "### Logic")):
+        if any(marker in str(v) for marker in ("## Diff", "## PR diff", "### Security", "### Style", "### Logic", "### Performance")):
             return ""
         cleaned = []
         for line in str(v).splitlines():

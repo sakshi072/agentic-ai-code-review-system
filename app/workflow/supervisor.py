@@ -21,7 +21,6 @@ from app.utils.supervisor_helper import decide_review_outcome, format_review_bod
 from app.workflow.router import chunk_router
 from app.tools.github_apis import _parse_review_ids, _tag_inline_comments, update_review
 from app.models.agent_finding_model import JudgeOutput, CuratedFinding
-from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from app.core.configs.settings import settings
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -90,7 +89,7 @@ async def supervisor_node(state: PRReviewState):
     raw_logic          = state.get("logic_findings") or []
     raw_performance = state.get("performance_findings") or []
     chunks               = state.get("chunks") or []
-    n_expected           = len(chunks) * 1
+    n_expected           = len(chunks) * 4
     n_completed          = state.get("agents_completed", 0)
     prior_review_id      = state.get("prior_review_id")
     prior_review_node_id = state.get("prior_review_node_id")
