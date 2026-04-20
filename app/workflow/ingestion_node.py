@@ -167,7 +167,6 @@ async def ingestion_node(state: PRReviewState) -> dict:
         logger.info(
             f"Ingestion node — chunk {i}: {len(chunk_files)} files, "
             f"{len(diff_context)} diff chars, "
-            f"{len(linter_outputs[i])} files with linter output"
         )
 
     if not chunks:
