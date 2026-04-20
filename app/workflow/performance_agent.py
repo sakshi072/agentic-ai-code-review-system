@@ -107,7 +107,7 @@ async def performance_agent_node(payload: dict) -> dict:
         result = await asyncio.wait_for(
             agent.ainvoke(
                 {"messages": [HumanMessage(content=user_prompt)]},
-                config={"recursion_limit": 10},
+                config={"recursion_limit": 4},
             ),
             timeout=_AGENT_TIMEOUT_SECONDS,
         )
