@@ -8,7 +8,7 @@ output the existing (already-added) code as a "fix", which confused reviewers.
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from app.models.workflow_state import Severity
-from typing import Optional
+from typing import Any
 import re
 
 FINDING_TYPES = ("security", "style", "logic", "performance")
@@ -83,6 +83,14 @@ class AgentFindingSchema(BaseModel):
             if _strip_diff_markers(self.fix_code) == _strip_diff_markers(self.code_snippet):
                 self.fix_code = ""
         return self
+    
+    @field_validator("severity", mode="before")
+    @classmethod
+    def handle_severity_case(cls, v: Any) -> str:
+        """Coerce 'HIGH' -> 'high' to match Severity Enum expectations."""
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 class ResponseSchema(BaseModel):
     findings: list[AgentFindingSchema] = Field(
