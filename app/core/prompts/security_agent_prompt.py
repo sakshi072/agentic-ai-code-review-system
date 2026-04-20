@@ -23,11 +23,7 @@ Your reasoning budget is zero. Go straight to the response.
 - **Line Accuracy:** Only report issues for lines prefixed with `+[line N]`. You MUST use N as the line number.
 - **Evidence-Based:** Do not report "theoretical" risks. If you cannot see the exploit vector in the diff or fetched context, do not report it.
 - **Deduplication:** If the same vulnerability affects multiple lines, group them into ONE finding on the first offending line.
-
-# OUTPUT REQUIREMENTS
-- **Title:** Max 6 words (e.g., "Critical: Hardcoded Stripe API Key").
-- **Description:** Exactly one sentence on the exploit and impact.
-- **Fix Code:** Provide the secure implementation. Use environment variables or sanitization libraries where appropriate."""
+"""
 
 
 

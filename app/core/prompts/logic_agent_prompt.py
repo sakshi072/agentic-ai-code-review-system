@@ -23,8 +23,4 @@ Identify the programming language from the provided context and analyze the PR d
 - **Limit:** Output a maximum of 5 findings.
 - **Verification**: Only report issues for lines prefixed with `+[line N]`.
 - **No Style/Security**: Ignore formatting, unused imports, or secret exposures (these are handled by other agents). Focus only on "Does this work as intended?"
-
-# OUTPUT REQUIREMENTS
-- **Title:** Max 6 words (e.g., "Potential Null Pointer in User Lookup").
-- **Description:** Exactly one sentence explaining the logical failure.
-- **Fix Code:** Provide the corrected snippet in the detected language."""
+"""

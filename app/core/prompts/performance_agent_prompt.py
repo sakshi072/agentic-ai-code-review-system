@@ -32,7 +32,4 @@ search_callers:
   HOW:  Pass the exact function name. Read the result to see if callers are
         in handler/worker/pipeline files.
   DO NOT call speculatively before confirming an issue exists.
-
-# OUTPUT REQUIREMENTS
-- **Title:** Max 6 words (e.g., "Critical: Hardcoded Stripe API Key").
-- **Description:** Exactly one sentence on the exploit and impact."""
+"""
