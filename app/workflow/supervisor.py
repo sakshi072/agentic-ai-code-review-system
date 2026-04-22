@@ -117,11 +117,6 @@ async def supervisor_node(state: PRReviewState):
             f"({n_expected - n_completed} agent(s) still running)"
         )
         return {}
-    
-    logger.info(
-        f"Supervisor — raw: {len(raw_security)} security, "
-        f"{len(raw_style_no_linter)} style"
-    )
 
     # ── Compute carried-over issues from unchanged files
     prev_all = state.get("open_issues_identified") or []
@@ -156,11 +151,6 @@ async def supervisor_node(state: PRReviewState):
 
     for f in curated:
         logger.info(f"logging curated findings: {f}")
- 
-    logger.info(
-        f"Supervisor — judge output: {len(curated)} finding(s) | "
-        f"severities: { {f.severity for f in curated} }"
-    )
 
     # open_issues is the judge's output — single flat list for next run
     open_issues = [f.model_dump() for f in curated]

@@ -40,14 +40,6 @@ async def style_agent_node(payload:dict):
         f"Style agent starting — {owner}/{repo}/#{pr_number} "
         f"({len(to_analyze)} files in chunk, "
     )
-    
-    # prompt = build_agent_prompt(
-    #     owner=owner,
-    #     repo=repo,
-    #     pr_number=pr_number,
-    #     diff_context=diff_context,
-    #     focus = "style discrepancies",
-    # )
 
     added_lines_only = "\n".join(
         line for line in diff_context.splitlines()

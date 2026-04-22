@@ -62,10 +62,6 @@ async def logic_agent_node(payload: dict) -> dict:
  
     # ------------------------------------------------------------------
     # Build the agent
-    # create_react_agent returns a compiled LangGraph graph.
-    # It owns the tool-calling loop, message accumulation, and stopping
-    # condition. max_iterations is expressed via recursion_limit on the
-    # config passed at invoke time.
     # ------------------------------------------------------------------
     llm = build_llm()
  
@@ -78,9 +74,6 @@ async def logic_agent_node(payload: dict) -> dict:
  
     # ------------------------------------------------------------------
     # Build the user prompt
-    # Diff first. File context is fetched on demand by the agent.
-    # owner/repo/head_sha are included so the agent can pass them to tools
-    # as explicit arguments — no closures needed.
     # ------------------------------------------------------------------
     user_prompt = build_agent_prompt(
         owner=owner,
@@ -100,7 +93,6 @@ async def logic_agent_node(payload: dict) -> dict:
  
     # ------------------------------------------------------------------
     # Run the agent
-    # recursion_limit caps the think→tool→observe loop at 10 iterations.
     # ------------------------------------------------------------------
     try:
         result = await asyncio.wait_for(

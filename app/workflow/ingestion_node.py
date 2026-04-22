@@ -23,7 +23,7 @@ from app.tools.linter import run_linters, filter_linter_to_diff
 logger = logging.getLogger(__name__)
 
 MAX_LINES_PER_CHUNK   = 1000000000000
-CHUNK_THRESHOLD_LINES = 500
+CHUNK_THRESHOLD_LINES = 1000000000000
 
 def chunk_files_by_lines(files: list[dict]) -> list[list[dict]]:
     chunks: list[list[dict]] = []

@@ -64,10 +64,6 @@ async def performance_agent_node(payload: dict) -> dict:
  
     # ------------------------------------------------------------------
     # Build the agent
-    # create_react_agent returns a compiled LangGraph graph.
-    # It owns the tool-calling loop, message accumulation, and stopping
-    # condition. max_iterations is expressed via recursion_limit on the
-    # config passed at invoke time.
     # ------------------------------------------------------------------
     llm = build_llm()
  
@@ -77,8 +73,10 @@ async def performance_agent_node(payload: dict) -> dict:
         system_prompt=PERFORMANCE_AGENT_SYSTEM_PROMPT,  # system message injected into every turn
         response_format=ResponseSchema,
     )
- 
+    
+    # ------------------------------------------------------------------
     # Build the user prompt
+    # ------------------------------------------------------------------
     user_prompt = build_agent_prompt(
         owner=owner,
         repo=repo,
