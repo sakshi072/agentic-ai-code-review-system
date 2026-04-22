@@ -15,12 +15,12 @@ from app.core.configs.github_server_config import MCPTool
 from app.workflow.style_agent import style_agent_node
 from app.workflow.ingestion_node import ingestion_node
 from app.workflow.logic_agent import logic_agent_node
+from app.workflow.performance_agent import performance_agent_node
 from langgraph.checkpoint.memory import InMemorySaver
 from app.utils.supervisor_helper import decide_review_outcome, format_review_body, build_inline_comments
 from app.workflow.router import chunk_router
 from app.tools.github_apis import _parse_review_ids, _tag_inline_comments, update_review
 from app.models.agent_finding_model import JudgeOutput, CuratedFinding
-from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from app.core.configs.settings import settings
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -29,12 +29,6 @@ import json
 
 logger = logging.getLogger(__name__)
 checkpointer = InMemorySaver()
-
-# _judge_llm = ChatOllama(
-#     model="mistral-nemo",
-#     base_url="http://127.0.0.1:11434",
-#     temperature=0,
-# ).with_structured_output(JudgeOutput)
 
 _judge_llm = ChatOpenAI(
         model="gpt-5-nano",
@@ -47,8 +41,8 @@ async def _run_judge(
     security_findings: list[dict],
     style_findings: list[dict],
     logic_findings: list[dict],
+    performance_findings: list[dict],
     carried_over: list[dict],
-    diff_context: str,
 ) -> list[CuratedFinding]:
     """
     Run the LLM judge over all findings — current run + carried-over.
@@ -60,12 +54,13 @@ async def _run_judge(
         n_security=len(security_findings),
         n_style=len(style_findings),
         n_logic = len(logic_findings),
+        n_performance = len(performance_findings),
         n_carried=len(carried_over),
         security_json=json.dumps(security_findings, indent=2, default=str),
         style_json=json.dumps(style_findings, indent=2, default=str),
         logic_json = json.dumps(logic_findings, indent=2, default=str),
+        performance_json = json.dumps(performance_findings, indent=2, default=str),
         carried_json=json.dumps(carried_over, indent=2, default=str),
-        diff_context=diff_context[:6000],
     )
 
     try:
@@ -75,7 +70,7 @@ async def _run_judge(
         ])
         logger.info(
             f"Judge — input: {len(security_findings)} security + "
-            f"{len(style_findings)} style + {len(logic_findings)} logic + {len(carried_over)} carried-over"
+            f"{len(style_findings)} style + {len(logic_findings)} logic + {len(performance_findings)} performance + {len(carried_over)} carried-over"
             f"→ {len(result.findings)} curated findings"
         )
         return result.findings
@@ -90,10 +85,12 @@ async def supervisor_node(state: PRReviewState):
     Synthesizes findings → decides review outcome → posts to GitHub.
     """
     raw_security         = state.get("security_findings") or []
-    raw_style            = state.get("style_findings") or []
+    raw_style_no_linter  = state.get("style_findings") or []
     raw_logic          = state.get("logic_findings") or []
+    raw_performance = state.get("performance_findings") or []
+    raw_linter = state.get("linter_outputs") or []
     chunks               = state.get("chunks") or []
-    n_expected           = len(chunks) * 3
+    n_expected           = len(chunks) * 4
     n_completed          = state.get("agents_completed", 0)
     prior_review_id      = state.get("prior_review_id")
     prior_review_node_id = state.get("prior_review_node_id")
@@ -101,7 +98,7 @@ async def supervisor_node(state: PRReviewState):
 
     logger.info(
         f"Supervisor — {n_completed}/{n_expected} agents done | "
-        f"{len(raw_security)} security, {len(raw_style)} style findings, {len(raw_logic)} logic findings"
+        f"{len(raw_security)} security, {len(raw_style_no_linter)} style findings, {len(raw_logic)} logic, {len(raw_performance)} performance findings"
     )
  
     # ── Guard: no chunks dispatched (all files unchanged) ────────────────────
@@ -120,11 +117,6 @@ async def supervisor_node(state: PRReviewState):
             f"({n_expected - n_completed} agent(s) still running)"
         )
         return {}
-    
-    logger.info(
-        f"Supervisor — raw: {len(raw_security)} security, "
-        f"{len(raw_style)} style"
-    )
 
     # ── Compute carried-over issues from unchanged files
     prev_all = state.get("open_issues_identified") or []
@@ -134,6 +126,7 @@ async def supervisor_node(state: PRReviewState):
         for chunk in chunks
         for f in chunk["files"]
     }
+    raw_style = raw_style_no_linter + raw_linter
 
     carried_over = [
         issue for issue in prev_all
@@ -143,33 +136,21 @@ async def supervisor_node(state: PRReviewState):
  
     logger.info(
         f"Supervisor — sending to judge: "
-        f"{len(raw_security)} security + {len(raw_style)} style + {len(raw_logic)} logic + "
+        f"{len(raw_security)} security + {len(raw_style)} style + {len(raw_logic)} logic + {len(raw_performance)} performance +"
         f"{len(carried_over)} carried-over"
     )
-    
-    # ── Aggregate diff context across all chunks
-    diff_context = "\n\n".join(
-        chunk.get("diff_context", "") for chunk in chunks
-    )
-
-    logger.info(f"diff context with line number : {diff_context}")
 
     logger.info(
         f"Agent findings with line numbers: "
         f"{sum(1 for f in raw_security + raw_style if f.get('line'))}/"
-        f"{len(raw_security) + len(raw_style)}"
+        f"{len(raw_security) + len(raw_style) + len(raw_logic) + len(raw_performance)}"
     )
 
     # ── LLM judge: curate all findings into one unified list
-    curated = await _run_judge(raw_security, raw_style, raw_logic, carried_over, diff_context)
+    curated = await _run_judge(raw_security, raw_style, raw_logic, raw_performance, carried_over)
 
     for f in curated:
         logger.info(f"logging curated findings: {f}")
- 
-    logger.info(
-        f"Supervisor — judge output: {len(curated)} finding(s) | "
-        f"severities: { {f.severity for f in curated} }"
-    )
 
     # open_issues is the judge's output — single flat list for next run
     open_issues = [f.model_dump() for f in curated]
@@ -252,7 +233,7 @@ def supervisor_pipeline():
     graph.add_node("style_agent", style_agent_node)
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("logic_agent", logic_agent_node)
-
+    graph.add_node("performance_agent", performance_agent_node)
     # Wire edges
     # Ingestion runs first, alone
     graph.add_edge(START, "ingestion")
@@ -266,6 +247,7 @@ def supervisor_pipeline():
     graph.add_edge("security_agent", "supervisor")
     graph.add_edge("style_agent", "supervisor")
     graph.add_edge("logic_agent", "supervisor")
+    graph.add_edge("performance_agent", "supervisor")
     graph.add_edge("supervisor", END)
 
     compiled = graph.compile(checkpointer=checkpointer)

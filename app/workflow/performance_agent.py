@@ -1,44 +1,46 @@
 """
-app/workflow/logic_agent.py
+app/workflow/performance_agent.py
  
-Logic agent node — reviews PR diff for logical correctness.
+Performance agent node — reviews PR diff for runtime performance issues.
  
-Uses langgraph.prebuilt.create_react_agent (the current production API as of
-langgraph 0.3+). This returns a compiled LangGraph graph directly — no
-AgentExecutor wrapper, no hidden prompts, no deprecated abstractions.
+Uses create_react_agent with two focused tools:
+  - ast_analyze: confirm loop nesting depth before flagging complexity
+  - search_callers: determine hot-path severity after confirming an issue
  
-The agent starts with the diff, fetches file context on demand via two
-focused tools, then produces structured findings.
+The agent starts with the diff and calls tools only on demand.
+response_format gives us structured output in one pass (no second LLM call).
 """
- 
-import logging
+
 import asyncio
+import logging
+
 from langchain_core.messages import HumanMessage
 from langchain.agents import create_agent
- 
-from app.core.prompts.logic_agent_prompt import LOGIC_AGENT_SYSTEM_PROMPT
-from app.models.agent_finding_model import ResponseSchema
-from app.models.workflow_state import AgentFinding
-from app.tools.gihub_files import fetch_import_file, fetch_reviewed_file
+from app.tools.gihub_files import fetch_reviewed_file
+from app.tools.performance_tools import ast_analyze, search_callers
+from app.core.configs.settings import settings
 from app.utils.agent_helper import build_agent_prompt, build_llm, find_line_in_diff
- 
-logger = logging.getLogger(__name__)
-_AGENT_TIMEOUT_SECONDS=300
- 
-# Tools the logic agent is allowed to call.
-# Both are top-level async @tool functions — no closures, no hidden state.
-LOGIC_AGENT_TOOLS = [fetch_reviewed_file, fetch_import_file]
+from app.models.agent_finding_model import ResponseSchema
+from app.core.prompts.performance_agent_prompt import PERFORMANCE_AGENT_SYSTEM_PROMPT
+from app.models.workflow_state import AgentFinding
 
-async def logic_agent_node(payload: dict) -> dict:
+logger = logging.getLogger(__name__)
+
+PERFORMANCE_AGENT_TOOLS = [fetch_reviewed_file, ast_analyze, search_callers]
+_AGENT_TIMEOUT_SECONDS = 120
+# ---------------------------------------------------------------------------
+# Performance agent node
+# ---------------------------------------------------------------------------
+async def performance_agent_node(payload: dict) -> dict:
     """
-    LangGraph node — logical code review on one diff chunk.
+    LangGraph node — performance code review on one diff chunk.
  
     Receives (via Send payload):
         owner, repo, pr_number, head_sha  — PR identity
         chunk                              — {files, diff_context, file_patches}
  
     Returns:
-        logic_findings   — list[AgentFinding] (accumulated via add reducer)
+        performance_findings   — list[AgentFinding] (accumulated via add reducer)
         agents_completed — 1
     """
     owner     = payload["owner"]
@@ -52,13 +54,13 @@ async def logic_agent_node(payload: dict) -> dict:
     file_patches = chunk["file_patches"]
  
     logger.info(
-        f"Logic agent starting — {owner}/{repo}/#{pr_number} "
+        f"Performance agent starting — {owner}/{repo}/#{pr_number} "
         f"({len(to_analyze)} file(s) in chunk)"
     )
  
     if not diff_context.strip():
-        logger.info("Logic agent — empty diff, skipping")
-        return {"logic_findings": [], "agents_completed": 1}
+        logger.info("Performance agent — empty diff, skipping")
+        return {"performance_findings": [], "agents_completed": 1}
  
     # ------------------------------------------------------------------
     # Build the agent
@@ -67,11 +69,11 @@ async def logic_agent_node(payload: dict) -> dict:
  
     agent = create_agent(
         model=llm,
-        tools=LOGIC_AGENT_TOOLS,
-        system_prompt=LOGIC_AGENT_SYSTEM_PROMPT,  # system message injected into every turn
-        response_format=ResponseSchema
+        tools=PERFORMANCE_AGENT_TOOLS,
+        system_prompt=PERFORMANCE_AGENT_SYSTEM_PROMPT,  # system message injected into every turn
+        response_format=ResponseSchema,
     )
- 
+    
     # ------------------------------------------------------------------
     # Build the user prompt
     # ------------------------------------------------------------------
@@ -80,15 +82,20 @@ async def logic_agent_node(payload: dict) -> dict:
         repo=repo,
         pr_number=pr_number,
         diff_context=diff_context,
-        focus="logical correctness",
+        focus="runtime performance",
     )
  
     user_prompt += (
         f"\n\n## Tool arguments\n"
         f"owner={owner!r}  repo={repo!r}  head_sha={head_sha!r}\n\n"
-        "Derive file paths from import lines in the diff:\n"
-        "  'from app.utils.agent_helper import X' → 'app/utils/agent_helper.py'\n\n"
-        "fetch_import_file budget: 4 calls max. Count. Stop at 4. Depth-1 only."
+        "## ast_analyze usage\n"
+        "The diff is a fragment — passing it to ast_analyze causes SyntaxError\n"
+        "or wrong nesting depth. Always fetch the full file first:\n"
+        "  1. Call fetch_reviewed_file(owner, repo, head_sha, filename)\n"
+        "  2. Pass the returned source to ast_analyze(code=<full source>)\n\n"
+        "## search_callers usage\n"
+        "Only call after confirming an issue. Pass the exact function name.\n"
+        "Use the result to raise severity if callers are in hot-path files."
     )
  
     # ------------------------------------------------------------------
@@ -104,19 +111,19 @@ async def logic_agent_node(payload: dict) -> dict:
         )
         response: ResponseSchema = result.get("structured_response")
         if response is None:
-            logger.warning("Logic agent — no structured_response, returning empty")
-            return {"logic_findings": [], "agents_completed": 1}
+            logger.warning("Performance agent — no structured_response, returning empty")
+            return {"performance_findings": [], "agents_completed": 1}
  
-        logger.info(f"Logic agent — {len(response.findings)} finding(s)")
+        logger.info(f"Performance agent — {len(response.findings)} finding(s)")
         for f in response.findings:
             logger.info(f"  [{f.severity}] {f.title} | file={f.file} | snippet={f.code_snippet[:60]!r}")
  
     except asyncio.TimeoutError:
-        logger.warning(f"Logic agent — timed out after {_AGENT_TIMEOUT_SECONDS}s")
-        return {"logic_findings": [], "agents_completed": 1}
+        logger.warning(f"Performance agent — timed out after {_AGENT_TIMEOUT_SECONDS}s")
+        return {"performance_findings": [], "agents_completed": 1}
     except Exception as exc:
-        logger.error(f"Logic agent — failed: {exc}", exc_info=True)
-        return {"logic_findings": [], "agents_completed": 1}
+        logger.error(f"Performance agent — failed: {exc}", exc_info=True)
+        return {"performance_findings": [], "agents_completed": 1}
  
     # ------------------------------------------------------------------
     # Map pydantic → AgentFinding TypedDict
@@ -137,7 +144,7 @@ async def logic_agent_node(payload: dict) -> dict:
         for f in response.findings
     ]
  
-    logger.info(f"Logic agent complete — {len(findings)} finding(s)")
+    logger.info(f"Performance agent complete — {len(findings)} finding(s)")
     for f in findings:
-        logger.info(f"Logic agent finding: {f}")
-    return {"logic_findings": findings, "agents_completed": 1}
+        logger.info(f"Performance agent finding: {f}")
+    return {"performance_findings": findings, "agents_completed": 1}

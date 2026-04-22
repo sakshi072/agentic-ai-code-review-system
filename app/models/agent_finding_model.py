@@ -8,10 +8,10 @@ output the existing (already-added) code as a "fix", which confused reviewers.
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from app.models.workflow_state import Severity
-from typing import Optional
+from typing import Any
 import re
 
-FINDING_TYPES = ("security", "style", "logic")
+FINDING_TYPES = ("security", "style", "logic", "performance")
 SEVERITIES    = ("critical", "high", "medium", "low", "info")
 
 
@@ -72,35 +72,37 @@ class AgentFindingSchema(BaseModel):
             cleaned.append(line[1:] if line.startswith(("+", "-")) else line)
         return "\n".join(cleaned)
 
+    @model_validator(mode="after")
+    def fix_must_differ_from_snippet(self) -> "AgentFindingSchema":
+        """
+        Clear fix_code if it is semantically identical to code_snippet.
+        Catches the pattern where the LLM copies the existing added line
+        as both the snippet and the suggested fix.
+        """
+        if self.fix_code and self.code_snippet:
+            if _strip_diff_markers(self.fix_code) == _strip_diff_markers(self.code_snippet):
+                self.fix_code = ""
+        return self
+    
+    @field_validator("severity", mode="before")
+    @classmethod
+    def handle_severity_case(cls, v: Any) -> str:
+        """Coerce 'HIGH' -> 'high' to match Severity Enum expectations."""
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
-class SecurityResponseSchema(BaseModel):
+class ResponseSchema(BaseModel):
     findings: list[AgentFindingSchema] = Field(
         max_length=5,
         default_factory=list,
         description="Top 5 most critical security findings only"
     )
-
-
-class StyleResponseSchema(BaseModel):
-    findings: list[AgentFindingSchema] = Field(
-        max_length=5,
-        default_factory=list,
-        description="Top 5 most critical style findings only"
-    )
-
-
-class LogicResponseSchema(BaseModel):
-    findings: list[AgentFindingSchema] = Field(
-        max_length=5,
-        default_factory=list,
-        description="Top 5 most critical logic findings only"
-    )
-
-
+    
 class CuratedFinding(BaseModel):
     """Single finding after LLM judge curation."""
 
-    finding_type:    str = Field(description="One of: security, style, logic")
+    finding_type:    str = Field(description="One of: security, style, logic, performance")
     severity:        str = Field(description="One of: critical, high, medium, low, info")
     file:            str = Field(description="File path where the issue was found")
     line:            int = Field(description="Line number — copied from source finding")
@@ -132,7 +134,7 @@ class CuratedFinding(BaseModel):
     def clean_fix_code(cls, v: str) -> str:
         if not v or str(v).strip().upper() in ("EMPTY", "N/A", "NONE", ""):
             return ""
-        if any(marker in str(v) for marker in ("## Diff", "## PR diff", "### Security", "### Style", "### Logic")):
+        if any(marker in str(v) for marker in ("## Diff", "## PR diff", "### Security", "### Style", "### Logic", "### Performance")):
             return ""
         cleaned = []
         for line in str(v).splitlines():
@@ -140,16 +142,9 @@ class CuratedFinding(BaseModel):
         return "\n".join(cleaned)
 
     @model_validator(mode="after")
-    def reject_fix_identical_to_snippet(self) -> "CuratedFinding":
-        """
-        Clear fix_code if it is semantically identical to code_snippet.
-        The judge was copying the added line from the diff as both the
-        snippet AND the fix, making the fix useless (it already exists).
-        """
+    def fix_must_differ_from_snippet(self) -> "CuratedFinding":
         if self.fix_code and self.code_snippet:
-            clean_snippet = _strip_diff_markers(self.code_snippet)
-            clean_fix     = _strip_diff_markers(self.fix_code)
-            if clean_fix == clean_snippet:
+            if _strip_diff_markers(self.fix_code) == _strip_diff_markers(self.code_snippet):
                 self.fix_code = ""
         return self
 

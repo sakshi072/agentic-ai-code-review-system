@@ -1,4 +1,3 @@
-from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from app.core.configs.settings import settings
 from app.clients.github_mcp_client import github_mcp_session
@@ -231,7 +230,6 @@ def build_agent_prompt(
     pr_number: str,
     diff_context: str,
     focus: str,
-    linter_output: Optional[dict[str, str]] = {},
 ) -> str:
 
     prompt = (
@@ -245,16 +243,6 @@ def build_agent_prompt(
     # ── Diff ──────────────────────────────────────────────────────────────────
     prompt += f"Diff\n{diff_context}\n"
 
-    # ── Linter output (mechanical violations) ────────────────────────────────
-    # if linter_output:
-    #     prompt += (
-    #         "Below is a condensed linter summary. "
-    #         "For each line number mentioned, cross-reference it with the [line N] markers in the diff to see the offending code. "
-    #         "Do NOT repeat the linter findings verbatim."
-    #     )
-    #     for filename, output in linter_output.items():
-    #         prompt += f"### {filename}\n```\n{output}\n```\n\n"
-    
     return prompt
 
 async def fetch_full_file(owner: str, repo: str, filepath: str, ref: str) -> str:
